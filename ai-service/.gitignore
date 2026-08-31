@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+
+# Trained weights and their metrics sidecar. These are build artefacts, often
+# hundreds of megabytes, and are reproducible from train.py plus the dataset.
+model/*.pt
+model/*.pth
+model/*.metrics.json
+
+# Training data. Keep photographs out of source control.
+data/

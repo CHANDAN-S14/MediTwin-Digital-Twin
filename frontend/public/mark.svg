@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="MediTwin mark">
+  <defs>
+    <linearGradient id="mtShell" x1="6" y1="56" x2="58" y2="8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#06B6D4"/>
+      <stop offset="0.55" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+    <linearGradient id="mtPeak" x1="24" y1="47" x2="24" y2="17" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F766E"/>
+      <stop offset="1" stop-color="#2DD4BF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Machined hexagonal housing -->
+  <path d="M58 32 L45 54.5 L19 54.5 L6 32 L19 9.5 L45 9.5 Z"
+        fill="none" stroke="url(#mtShell)" stroke-width="3"
+        stroke-linejoin="round"/>
+
+  <!-- Left peak: the physical robot, solid mass -->
+  <path d="M16.5 44 L25.25 19.5 L34 44 Z" fill="url(#mtPeak)"/>
+
+  <!-- Right peak: its digital twin, same form rendered as simulation -->
+  <path d="M30 44 L38.75 19.5 L47.5 44 Z"
+        fill="none" stroke="#2DD4BF" stroke-width="2.5"
+        stroke-linejoin="round" stroke-dasharray="5.5 4"/>
+
+  <!-- Mirror axis: where the physical is reflected into the model -->
+  <line x1="32" y1="15" x2="32" y2="49" stroke="#F59E0B"
+        stroke-width="1.5" stroke-dasharray="2.5 3.5" opacity="0.9"/>
+</svg>

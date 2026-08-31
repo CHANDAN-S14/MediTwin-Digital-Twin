@@ -1,0 +1,16 @@
+{
+  "classes": ["yellow", "red", "blue", "general"],
+  "model_version": "untrained-0.1.0",
+  "input_size": 224,
+  "normalization": {
+    "mean": [0.485, 0.456, 0.406],
+    "std": [0.229, 0.224, 0.225]
+  },
+  "labels": {
+    "yellow": "Yellow — incineration or deep burial",
+    "red": "Red — autoclave, microwave or chemical treatment, then shredding",
+    "blue": "Blue — disinfection, then autoclave or shredding",
+    "general": "General — ordinary municipal waste stream"
+  },
+  "_comment": "Class ORDER is the contract between train.py and the classifier. Index 0 must be yellow in both, forever. Reordering this list silently remaps every prediction a trained checkpoint makes — the model would keep reporting 94% confidence while naming the wrong bin. train.py writes its own class order into the checkpoint and the classifier refuses to load one that disagrees with this file."
+}

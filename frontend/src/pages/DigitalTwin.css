@@ -1,0 +1,191 @@
+.digital-twin-page {
+  width: 100%;
+  min-height: 100vh;
+  padding: 24px;
+  background: #f5f7fb;
+}
+
+.digital-twin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.digital-twin-header h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.digital-twin-header p {
+  margin-top: 6px;
+  color: #667085;
+}
+
+.connection-status {
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.connection-status.idle {
+  background: #e8f5e9;
+  color: #16803c;
+}
+
+.connection-status.active {
+  background: #fff3cd;
+  color: #946200;
+}
+
+.digital-twin-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 20px;
+}
+
+.twin-card {
+  height: 680px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: white;
+  border: 1px solid #e5e7eb;
+}
+
+.twin-card canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.side-panel section {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.side-panel h2 {
+  margin: 0 0 14px;
+  font-size: 17px;
+}
+
+.robot-name {
+  font-size: 14px;
+  color: #667085;
+}
+
+.robot-status-value {
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.robot-status p {
+  color: #667085;
+  line-height: 1.5;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid #eee;
+}
+
+.info-row span {
+  color: #667085;
+}
+
+.bin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bin-card {
+  padding: 12px;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.bin-card > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.bin-card span {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bin-progress {
+  height: 8px;
+  margin-top: 10px;
+  background: #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.bin-progress div {
+  height: 100%;
+  transition: width 0.5s ease;
+}
+
+.bin-card.yellow .bin-progress div {
+  background: #eab308;
+}
+
+.bin-card.red .bin-progress div {
+  background: #ef4444;
+}
+
+.bin-card.blue .bin-progress div {
+  background: #3b82f6;
+}
+
+.bin-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 7px;
+  color: #667085;
+}
+
+.event-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.event {
+  padding: 9px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.event span {
+  font-size: 10px;
+  color: #98a2b3;
+}
+
+.event p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #344054;
+}
+
+@media (max-width: 1000px) {
+  .digital-twin-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .twin-card {
+    height: 550px;
+  }
+}

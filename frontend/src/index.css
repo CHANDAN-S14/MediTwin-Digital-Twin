@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Base layer: the handful of things that belong in CSS rather than in class
+ * attributes — global resets, focus behaviour, and the accessibility floor.
+ */
+@layer base {
+  :root {
+    color-scheme: light;
+    /* Tabular figures everywhere by default. Metrics on this dashboard update
+       every few seconds, and proportional digits make numbers jump sideways as
+       they change, which reads as flicker. */
+    font-variant-numeric: tabular-nums;
+  }
+
+  * {
+    @apply border-line;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    /* Anchors the dashboard to the viewport so the sidebar can scroll
+       independently of the content column. */
+    @apply min-h-screen;
+  }
+
+  /* One visible focus style, applied only for keyboard navigation. Removing
+     outlines without replacing them is the single most common accessibility
+     regression in a dashboard like this. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand/60 ring-offset-2 ring-offset-canvas;
+  }
+
+  ::selection {
+    @apply bg-brand/20 text-ink;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-semibold tracking-tight text-ink;
+  }
+
+  /* Respect the OS-level reduced-motion setting.
+     Note this deliberately does NOT use `animation: none` on everything — the
+     3D canvas is driven by requestAnimationFrame, not CSS, so it is handled
+     separately in the R3F components where the frame loop can actually be
+     paused. Killing CSS animation alone would leave the canvas spinning and
+     look like the setting was ignored. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Scrollbars. Styled because the sidebar and every table on these pages
+     scrolls, and the default Windows scrollbar is visually louder than any
+     content next to it. */
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: #CBD5E1 transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    @apply rounded-pill bg-slate-300;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
+
+  /* The eyebrow label above every card title in the reference layout. */
+  .eyebrow {
+    @apply text-eyebrow font-semibold uppercase tracking-[0.08em] text-faint;
+  }
+
+  /* Identifiers an operator reads aloud during a handover. */
+  .ident {
+    @apply font-mono text-[0.8125rem] tracking-tight;
+  }
+
+  /* Skeleton shimmer for loading rows. */
+  .shimmer {
+    @apply relative overflow-hidden bg-subtle;
+  }
+  .shimmer::after {
+    content: '';
+    @apply absolute inset-0 animate-sweep;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent);
+  }
+}
+
+/**
+ * Recharts overrides.
+ *
+ * Recharts renders an SVG that takes focus outlines from the global rule above
+ * and draws a visible ring around the whole chart on click, which looks like a
+ * bug. The tooltip wrapper also carries its own hard-coded border.
+ */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+.recharts-default-tooltip {
+  @apply !rounded-lg !border-line !shadow-raised;
+}
+
+.recharts-cartesian-axis-tick text {
+  @apply fill-faint text-[0.6875rem];
+}

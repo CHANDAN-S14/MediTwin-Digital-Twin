@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+npm-debug.log*
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.pt
+*.pth
+uploads/
+coverage/
+.vite/
+
+# Scratch files from generating the brand mark. Not part of the build; kept out
+# of source control rather than deleted.
+_*.png

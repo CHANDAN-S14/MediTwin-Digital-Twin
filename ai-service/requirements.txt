@@ -1,0 +1,30 @@
+# MediTwin classification service
+#
+# Install:
+#     pip install -r requirements.txt
+#
+# torch and torchvision are the heavy items here (~200 MB for the CPU build,
+# considerably more for CUDA). If you do not have an NVIDIA GPU, install the
+# CPU-only wheels first and save yourself the CUDA download:
+#
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#     pip install -r requirements.txt
+#
+# Versions are pinned with >= rather than == so this still resolves on newer
+# Python releases. If you need a byte-identical environment, freeze it yourself
+# after a successful install.
+
+# --- Web layer ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+# Required by FastAPI to parse multipart uploads. Without it, every call to
+# /api/v1/predict fails at import time with a message that does not obviously
+# point here.
+python-multipart>=0.0.9
+pydantic>=2.6.0
+python-dotenv>=1.0.0
+
+# --- Model ---
+torch>=2.1.0
+torchvision>=0.16.0
+pillow>=10.2.0

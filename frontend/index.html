@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="theme-color" content="#0D9488" />
+
+    <title>MediTwin — Biomedical Waste Digital Twin</title>
+    <meta
+      name="description"
+      content="Digital twin and AI orchestration platform for autonomous biomedical waste collection, segregation and chain-of-custody tracking."
+    />
+
+    <!--
+      preconnect before the stylesheet so the font request does not wait on a
+      fresh TLS handshake. display=swap keeps text visible while Inter loads
+      rather than leaving the dashboard blank.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!--
+      A plain message for the no-JS case. This is a real-time dashboard built on
+      WebSockets and WebGL, so there is no meaningful degraded version to serve —
+      saying so is more useful than an empty page.
+    -->
+    <noscript>
+      <div style="font-family: system-ui, sans-serif; padding: 3rem; max-width: 34rem; color: #0F172A">
+        <h1 style="font-size: 1.25rem; margin: 0 0 0.5rem">MediTwin needs JavaScript</h1>
+        <p style="color: #64748B; line-height: 1.6">
+          This dashboard streams live robot telemetry and renders a 3D digital twin, both of which
+          require JavaScript. Enable it for this site and reload.
+        </p>
+      </div>
+    </noscript>
+
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

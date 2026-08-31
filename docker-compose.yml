@@ -1,0 +1,94 @@
+# MediTwin — local orchestration
+#
+# Two ways to use this file.
+#
+#   docker compose up -d mongo
+#       Just the database. Run the three app services natively with npm/python
+#       for fast reloads. This is the recommended development setup.
+#
+#   docker compose --profile full up --build
+#       Everything, containerised. Slower to iterate on, but useful for checking
+#       the whole stack starts from a clean machine.
+#
+# JWT_SECRET has no default on purpose. The backend refuses to boot without one,
+# because a fallback secret that works in development is a fallback secret that
+# ships to production.
+
+name: meditwin
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: meditwin-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # The app services wait on this rather than on the container merely being
+      # up: mongod accepts a TCP connection several seconds before it will answer
+      # a query, and connecting in that window looks like an auth failure.
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  backend:
+    profiles: ['full']
+    build:
+      context: ./backend
+    container_name: meditwin-api
+    restart: unless-stopped
+    ports:
+      - '5000:5000'
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      # host.docker.internal is not needed here — compose gives us DNS for the
+      # service name, and `mongo` resolves inside the network.
+      MONGO_URI: mongodb://mongo:27017/meditwin
+      AI_SERVICE_URL: http://ai-service:8000
+      CLIENT_ORIGIN: http://localhost:5173,http://localhost:4173
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in a .env file next to this compose file}
+      JWT_EXPIRES_IN: 7d
+      SIM_TICK_MS: 1200
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  ai-service:
+    profiles: ['full']
+    build:
+      context: ./ai-service
+    container_name: meditwin-ai
+    restart: unless-stopped
+    ports:
+      - '8000:8000'
+    environment:
+      PORT: 8000
+      LOG_LEVEL: info
+      DEVICE: cpu
+      CORS_ORIGINS: http://localhost:5000,http://localhost:5173
+    volumes:
+      # Mounted so a checkpoint trained on the host is picked up without a
+      # rebuild. The service starts fine with an empty directory and reports
+      # itself untrained.
+      - ./ai-service/model:/app/model
+
+  frontend:
+    profiles: ['full']
+    build:
+      context: ./frontend
+    container_name: meditwin-web
+    restart: unless-stopped
+    ports:
+      - '5173:5173'
+    environment:
+      VITE_PROXY_TARGET: http://backend:5000
+    depends_on:
+      - backend
+
+volumes:
+  mongo-data:
