@@ -1,127 +1,26 @@
-import { Server } from 'socket.io';
+import { io } from "socket.io-client";
 
-let io = null;
+const BACKEND_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-export const EVENTS = {
-  ROBOT_STATUS: 'robot:status',
-  ROBOT_POSITION: 'robot:position',
-  DIGITAL_TWIN_UPDATE: 'digital-twin:update',
-  WASTE_COLLECTED: 'waste:collected',
-  WASTE_DEPOSITED: 'waste:deposited',
-  TASK_UPDATED: 'task:updated',
-};
+const socket = io(BACKEND_URL, {
+  autoConnect: false,
+  transports: ["websocket", "polling"],
+  withCredentials: true,
+});
 
-export const initSocket = (server) => {
-  io = new Server(server, {
-    cors: {
-      origin: true,
-      credentials: true,
-    },
-  });
-
-  io.on('connection', (socket) => {
-    socket.on('join-hospital', (hospitalId) => {
-      if (hospitalId) {
-        socket.join(`hospital:${hospitalId}`);
-      }
-
-      // Demo/global fleet room
-      socket.join('digital-twin');
-    });
-
-    socket.on('join-digital-twin', () => {
-      socket.join('digital-twin');
-    });
-
-    socket.on('disconnect', () => {
-      // Nothing required here
-    });
-  });
-
-  console.log('Socket.IO ready');
-
-  return io;
-};
-
-export const getIO = () => io;
-
-export const emitToHospital = (hospitalId, event, data) => {
-  if (!io) return;
-
-  if (hospitalId) {
-    io.to(`hospital:${hospitalId}`).emit(event, data);
+export function connectDigitalTwin() {
+  if (!socket.connected) {
+    socket.connect();
   }
 
-  // Always update the demo Digital Twin
-  io.to('digital-twin').emit(event, data);
-};
+  return socket;
+}
 
-export const emitRobotStatus = (robotId, data) => {
-  if (!io) return;
+export function disconnectDigitalTwin() {
+  if (socket.connected) {
+    socket.disconnect();
+  }
+}
 
-  const payload = {
-    robotId,
-    ...data,
-  };
-
-  io.emit(EVENTS.ROBOT_STATUS, payload);
-};
-
-export const emitRobotPosition = (robotId, position) => {
-  if (!io) return;
-
-  io.emit(EVENTS.ROBOT_POSITION, {
-    robotId,
-    position,
-  });
-};
-
-export const emitDigitalTwinUpdate = (robotId, data = {}) => {
-  if (!io) return;
-
-  io.emit(EVENTS.DIGITAL_TWIN_UPDATE, {
-    robotId,
-    timestamp: new Date().toISOString(),
-    ...data,
-  });
-};
-
-export const emitWasteCollected = (data) => {
-  if (!io) return;
-
-  io.emit(EVENTS.WASTE_COLLECTED, {
-    timestamp: new Date().toISOString(),
-    ...data,
-  });
-};
-
-export const emitWasteDeposited = (data) => {
-  if (!io) return;
-
-  io.emit(EVENTS.WASTE_DEPOSITED, {
-    timestamp: new Date().toISOString(),
-    ...data,
-  });
-};
-
-export const emitTaskUpdated = (data) => {
-  if (!io) return;
-
-  io.emit(EVENTS.TASK_UPDATED, {
-    timestamp: new Date().toISOString(),
-    ...data,
-  });
-};
-
-export default {
-  initSocket,
-  getIO,
-  emitToHospital,
-  emitRobotStatus,
-  emitRobotPosition,
-  emitDigitalTwinUpdate,
-  emitWasteCollected,
-  emitWasteDeposited,
-  emitTaskUpdated,
-  EVENTS,
-};
+export default socket;
