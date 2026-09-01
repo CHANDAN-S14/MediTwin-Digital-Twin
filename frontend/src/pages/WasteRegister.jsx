@@ -1,28 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { waste as wasteApi } from "../services/api.js";
+import socket from "../services/socket";
 
-let socket = null;
 
-try {
-  // Socket.IO is optional. The page still works with polling if it is unavailable.
-  // eslint-disable-next-line global-require
-  const socketModule = await import("socket.io-client");
-  const io = socketModule.io;
 
-  if (io) {
-    const socketUrl =
-      import.meta.env.VITE_SOCKET_URL ||
-      import.meta.env.VITE_API_URL ||
-      "http://localhost:5000";
-
-    socket = io(socketUrl, {
-      transports: ["websocket", "polling"],
-      autoConnect: true,
-    });
-  }
-} catch {
-  socket = null;
-}
 
 const REFRESH_INTERVAL = 3000;
 
