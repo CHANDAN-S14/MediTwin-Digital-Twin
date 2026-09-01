@@ -9,18 +9,18 @@ const socket = io(BACKEND_URL, {
   withCredentials: true,
 });
 
-export function connectDigitalTwin() {
+export const connectDigitalTwin = () => {
   if (!socket.connected) {
     socket.connect();
   }
 
   return socket;
-}
+};
 
-export function disconnectDigitalTwin() {
+export const disconnectDigitalTwin = () => {
   if (socket.connected) {
     socket.disconnect();
   }
-}
+};
 
 export default socket;
