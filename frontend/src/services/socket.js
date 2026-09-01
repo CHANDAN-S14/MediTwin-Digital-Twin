@@ -2,24 +2,26 @@ import { io } from "socket.io-client";
 
 const SOCKET_URL =
   import.meta.env.VITE_SOCKET_URL ||
-  "https://meditwin-digital-twin.onrender.com";
+  "http://localhost:5000";
+
 const socket = io(SOCKET_URL, {
   autoConnect: false,
   transports: ["websocket", "polling"],
+  withCredentials: true,
 });
 
-export const connectDigitalTwin = () => {
+export function connectDigitalTwin() {
   if (!socket.connected) {
     socket.connect();
   }
 
-  return socket;
-};
+  socket.emit("digitalTwin:join");
+}
 
-export const disconnectSocket = () => {
+export function disconnectDigitalTwin() {
   if (socket.connected) {
     socket.disconnect();
   }
-};
+}
 
 export default socket;
