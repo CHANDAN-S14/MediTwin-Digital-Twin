@@ -1,7 +1,7 @@
 import http from 'node:http';
 import app from './src/app.js';
 import connectDB, { disconnectDB } from './src/config/db.js';
-import { initSocket } from './src/services/socketService.js';
+import { initializeSocket } from './src/services/socketService.js';
 import {
   stopAll,
   runningCount,
@@ -14,7 +14,7 @@ const server = http.createServer(app);
 const start = async () => {
   await connectDB();
 
-  initSocket(server);
+initializeSocket(server);
 
   server.listen(env.port, () => {
     logger.info(
