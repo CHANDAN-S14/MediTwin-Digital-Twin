@@ -1,16 +1,492 @@
-{
-  "classes": ["yellow", "red", "blue", "general"],
-  "model_version": "untrained-0.1.0",
-  "input_size": 224,
-  "normalization": {
-    "mean": [0.485, 0.456, 0.406],
-    "std": [0.229, 0.224, 0.225]
-  },
-  "labels": {
-    "yellow": "Yellow — incineration or deep burial",
-    "red": "Red — autoclave, microwave or chemical treatment, then shredding",
-    "blue": "Blue — disinfection, then autoclave or shredding",
-    "general": "General — ordinary municipal waste stream"
-  },
-  "_comment": "Class ORDER is the contract between train.py and the classifier. Index 0 must be yellow in both, forever. Reordering this list silently remaps every prediction a trained checkpoint makes — the model would keep reporting 94% confidence while naming the wrong bin. train.py writes its own class order into the checkpoint and the classifier refuses to load one that disagrees with this file."
-}
+from pathlib import Path
+
+import torch
+import torch.nn.functional as F
+
+from torchvision.models import (
+    mobilenet_v3_small,
+    MobileNet_V3_Small_Weights,
+)
+
+from app.preprocessing.preprocess import preprocess_image
+
+from config import (
+    CLASSES,
+    MODEL_PATH,
+    MODEL_VERSION,
+    CONFIDENCE_THRESHOLD,
+)
+
+
+# ============================================================
+# DEVICE
+# ============================================================
+
+def resolve_device(requested="auto"):
+    """
+    Resolve the device used for training/inference.
+
+    auto -> CUDA if available, otherwise CPU
+    cpu  -> CPU
+    cuda -> CUDA if available
+    """
+
+    requested = str(requested).lower().strip()
+
+    if requested == "cpu":
+        return torch.device("cpu")
+
+    if requested == "cuda":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+
+        print("CUDA requested but not available. Using CPU.")
+        return torch.device("cpu")
+
+    # auto
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+
+    return torch.device("cpu")
+
+
+DEVICE = resolve_device("auto")
+
+
+# ============================================================
+# MODEL CREATION
+# ============================================================
+
+def build_model(
+    architecture="mobilenet_v3_small",
+    num_classes=None,
+    pretrained=True,
+):
+    """
+    Create the same model architecture used during training
+    and inference.
+    """
+
+    num_classes = num_classes or len(CLASSES)
+
+    if architecture != "mobilenet_v3_small":
+        raise ValueError(
+            f"Unsupported architecture: {architecture}"
+        )
+
+    # Use ImageNet weights only during training.
+    # Render inference will load the trained checkpoint.
+    weights = (
+        MobileNet_V3_Small_Weights.DEFAULT
+        if pretrained
+        else None
+    )
+
+    model = mobilenet_v3_small(
+        weights=weights
+    )
+
+    input_features = (
+        model.classifier[-1].in_features
+    )
+
+    model.classifier[-1] = torch.nn.Linear(
+        input_features,
+        num_classes
+    )
+
+    return model
+
+
+# ============================================================
+# CLASSIFIER HEAD
+# ============================================================
+
+def head_parameters(
+    model,
+    architecture="mobilenet_v3_small",
+):
+    """
+    Return parameters belonging to the final classifier head.
+
+    train.py uses this during the first training phase
+    while the backbone remains frozen.
+    """
+
+    if architecture != "mobilenet_v3_small":
+        raise ValueError(
+            f"Unsupported architecture: {architecture}"
+        )
+
+    return model.classifier[-1].parameters()
+
+
+# ============================================================
+# WASTE CLASSIFIER
+# ============================================================
+
+class WasteClassifier:
+
+    def __init__(self):
+
+        self.model = None
+
+        self.model_loaded = False
+
+        self.model_trained = False
+
+        self.load_error = None
+
+        self.model_version = MODEL_VERSION
+
+        self.device = DEVICE
+
+        self._load_model()
+
+    # --------------------------------------------------------
+    # CREATE MODEL
+    # --------------------------------------------------------
+
+    def _create_model(self):
+
+        return build_model(
+            architecture="mobilenet_v3_small",
+            num_classes=len(CLASSES),
+            pretrained=False,
+        )
+
+    # --------------------------------------------------------
+    # LOAD MODEL
+    # --------------------------------------------------------
+
+    def _load_model(self):
+
+        try:
+
+            self.model = self._create_model()
+
+            model_path = Path(MODEL_PATH)
+
+            print(
+                f"Loading waste classifier from: {model_path}"
+            )
+
+            # ------------------------------------------------
+            # MODEL FILE DOES NOT EXIST
+            # ------------------------------------------------
+
+            if not model_path.exists():
+
+                self.model.to(self.device)
+
+                self.model.eval()
+
+                self.model_loaded = True
+
+                self.model_trained = False
+
+                self.load_error = (
+                    f"Model file not found: {model_path}"
+                )
+
+                print(
+                    f"WARNING: {self.load_error}"
+                )
+
+                return
+
+            # ------------------------------------------------
+            # LOAD CHECKPOINT
+            # ------------------------------------------------
+
+            checkpoint = torch.load(
+                model_path,
+                map_location=self.device,
+            )
+
+            # ------------------------------------------------
+            # YOUR train.py FORMAT
+            # ------------------------------------------------
+
+            if (
+                isinstance(checkpoint, dict)
+                and "state_dict" in checkpoint
+            ):
+
+                # Verify classes when available
+                checkpoint_classes = checkpoint.get(
+                    "classes"
+                )
+
+                if (
+                    checkpoint_classes is not None
+                    and list(checkpoint_classes)
+                    != list(CLASSES)
+                ):
+
+                    raise ValueError(
+                        "Checkpoint class order does not "
+                        "match classes.json. "
+                        f"Checkpoint: {checkpoint_classes}, "
+                        f"Config: {CLASSES}"
+                    )
+
+                self.model.load_state_dict(
+                    checkpoint["state_dict"]
+                )
+
+                self.model_version = checkpoint.get(
+                    "model_version",
+                    MODEL_VERSION,
+                )
+
+            # ------------------------------------------------
+            # BACKWARD COMPATIBILITY
+            # ------------------------------------------------
+
+            elif (
+                isinstance(checkpoint, dict)
+                and "model_state_dict" in checkpoint
+            ):
+
+                self.model.load_state_dict(
+                    checkpoint["model_state_dict"]
+                )
+
+                self.model_version = checkpoint.get(
+                    "model_version",
+                    MODEL_VERSION,
+                )
+
+            # ------------------------------------------------
+            # RAW state_dict
+            # ------------------------------------------------
+
+            elif isinstance(checkpoint, dict):
+
+                self.model.load_state_dict(
+                    checkpoint
+                )
+
+            else:
+
+                raise ValueError(
+                    "Unsupported model checkpoint format"
+                )
+
+            # ------------------------------------------------
+            # FINALIZE
+            # ------------------------------------------------
+
+            self.model.to(self.device)
+
+            self.model.eval()
+
+            self.model_loaded = True
+
+            self.model_trained = True
+
+            self.load_error = None
+
+            print(
+                "Waste classifier loaded successfully"
+            )
+
+            print(
+                f"Model version: {self.model_version}"
+            )
+
+            print(
+                f"Device: {self.device}"
+            )
+
+            print(
+                f"Classes: {CLASSES}"
+            )
+
+        except Exception as error:
+
+            self.model = None
+
+            self.model_loaded = False
+
+            self.model_trained = False
+
+            self.load_error = str(error)
+
+            print(
+                f"ERROR loading waste classifier: "
+                f"{self.load_error}"
+            )
+
+    # --------------------------------------------------------
+    # PREDICT
+    # --------------------------------------------------------
+
+    def predict(
+        self,
+        image_bytes: bytes,
+    ):
+
+        if not self.model_loaded:
+
+            raise RuntimeError(
+                "Model failed to load"
+            )
+
+        if not self.model_trained:
+
+            raise RuntimeError(
+                "Model is not trained"
+            )
+
+        # ----------------------------------------------------
+        # PREPROCESS IMAGE
+        # ----------------------------------------------------
+
+        image = preprocess_image(
+            image_bytes
+        )
+
+        image = image.to(
+            self.device
+        )
+
+        # ----------------------------------------------------
+        # INFERENCE
+        # ----------------------------------------------------
+
+        with torch.no_grad():
+
+            output = self.model(
+                image
+            )
+
+            probabilities = F.softmax(
+                output,
+                dim=1,
+            )[0]
+
+        # ----------------------------------------------------
+        # TOP 3
+        # ----------------------------------------------------
+
+        values, indices = torch.topk(
+            probabilities,
+            k=min(
+                len(CLASSES),
+                3,
+            ),
+        )
+
+        prediction_index = int(
+            indices[0].item()
+        )
+
+        prediction = CLASSES[
+            prediction_index
+        ]
+
+        confidence = float(
+            values[0].item()
+        )
+
+        # ----------------------------------------------------
+        # ALTERNATIVES
+        # ----------------------------------------------------
+
+        alternatives = []
+
+        for value, index in zip(
+            values[1:],
+            indices[1:],
+        ):
+
+            alternatives.append(
+                {
+                    "category": CLASSES[
+                        int(index.item())
+                    ],
+                    "confidence": round(
+                        float(value.item()),
+                        4,
+                    ),
+                }
+            )
+
+        # ----------------------------------------------------
+        # COMPARTMENT
+        # ----------------------------------------------------
+
+        compartment = self.get_compartment(
+            prediction
+        )
+
+        # ----------------------------------------------------
+        # REVIEW FLAG
+        # ----------------------------------------------------
+
+        needs_review = (
+            confidence
+            < CONFIDENCE_THRESHOLD
+        )
+
+        return {
+
+            "prediction":
+                prediction,
+
+            "confidence":
+                round(
+                    confidence,
+                    4,
+                ),
+
+            "alternatives":
+                alternatives,
+
+            "compartment":
+                compartment,
+
+            "model_version":
+                self.model_version,
+
+            "needs_review":
+                needs_review,
+        }
+
+    # --------------------------------------------------------
+    # COMPARTMENT
+    # --------------------------------------------------------
+
+    @staticmethod
+    def get_compartment(
+        category: str,
+    ):
+
+        slots = {
+
+            "yellow":
+                "YELLOW-01",
+
+            "red":
+                "RED-02",
+
+            "blue":
+                "BLUE-01",
+
+            "general":
+                "GENERAL-01",
+        }
+
+        return slots.get(
+            category,
+            "GENERAL-01",
+        )
+
+
+# ============================================================
+# GLOBAL CLASSIFIER INSTANCE
+# ============================================================
+
+classifier = WasteClassifier()
