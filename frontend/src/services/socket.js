@@ -1,12 +1,12 @@
-import { io } from 'socket.io-client';
+import { io } from "socket.io-client";
 
 const SOCKET_URL =
   import.meta.env.VITE_SOCKET_URL ||
-  'http://localhost:5000';
+  "http://localhost:5000";
 
-export const socket = io(SOCKET_URL, {
-  autoConnect: true,
-  transports: ['websocket', 'polling'],
+const socket = io(SOCKET_URL, {
+  autoConnect: false,
+  transports: ["websocket", "polling"],
 });
 
 export const connectDigitalTwin = () => {
@@ -14,11 +14,13 @@ export const connectDigitalTwin = () => {
     socket.connect();
   }
 
-  socket.emit('join-digital-twin');
+  return socket;
 };
 
 export const disconnectSocket = () => {
-  socket.disconnect();
+  if (socket.connected) {
+    socket.disconnect();
+  }
 };
 
 export default socket;
