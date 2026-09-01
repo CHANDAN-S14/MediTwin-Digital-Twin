@@ -60,6 +60,14 @@ app.use(
 
 // Unauthenticated and dependency-free, so a load balancer can probe it while
 // the database is still coming up.
+
+app.get('/', (_req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'MediTwin Backend API is running',
+    status: 'online',
+  });
+});
 app.get('/health', health);
 
 app.use('/api/v1', routes);
