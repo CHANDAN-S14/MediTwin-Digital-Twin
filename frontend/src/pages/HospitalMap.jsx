@@ -5,7 +5,7 @@ import {
   Grid,
   Text,
   Float,
-  Environment,
+  
 } from '@react-three/drei';
 
 /* ============================================================
@@ -569,7 +569,7 @@ function HospitalScene() {
         intensity={1.2}
       />
 
-      <Environment preset="city" />
+      
 
       {/* Hospital floor */}
       <Floor />
