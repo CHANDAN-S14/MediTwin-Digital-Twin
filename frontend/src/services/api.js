@@ -19,8 +19,9 @@ const TOKEN_KEY = 'meditwin.token';
  *
  * If it is empty, Vite proxy is used.
  */
-const API_BASE =
-  `${import.meta.env.VITE_API_URL ?? ''}/api/v1`;
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  'https://meditwin-digital-twin.onrender.com/api/v1';
 
 
 /*
