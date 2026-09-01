@@ -1,26 +1,30 @@
-import { io } from "socket.io-client";
+import { Server } from "socket.io";
 
-const BACKEND_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000";
+let io = null;
 
-const socket = io(BACKEND_URL, {
-  autoConnect: false,
-  transports: ["websocket", "polling"],
-  withCredentials: true,
-});
+export function initializeSocket(server) {
+  io = new Server(server, {
+    cors: {
+      origin: process.env.CLIENT_URL || "http://localhost:5173",
+      credentials: true,
+    },
+  });
 
-export const connectDigitalTwin = () => {
-  if (!socket.connected) {
-    socket.connect();
+  io.on("connection", (socket) => {
+    console.log("Socket connected:", socket.id);
+
+    socket.on("disconnect", () => {
+      console.log("Socket disconnected:", socket.id);
+    });
+  });
+
+  return io;
+}
+
+export function getIO() {
+  if (!io) {
+    throw new Error("Socket.IO has not been initialized");
   }
 
-  return socket;
-};
-
-export const disconnectDigitalTwin = () => {
-  if (socket.connected) {
-    socket.disconnect();
-  }
-};
-
-export default socket;
+  return io;
+}
