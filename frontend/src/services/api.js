@@ -9,17 +9,18 @@ import axios from 'axios';
 const TOKEN_KEY = 'meditwin.token';
 
 /*
- * If VITE_API_URL is:
+ * Production:
  *
- *   http://localhost:5000
+ * VITE_API_URL should be:
  *
- * requests become:
+ * https://meditwin-digital-twin.onrender.com/api/v1
  *
- *   http://localhost:5000/api/v1/...
+ * Local development:
  *
- * If it is empty, Vite proxy is used.
+ * http://localhost:5000/api/v1
  */
-const API_URL =
+
+const API_BASE =
   import.meta.env.VITE_API_URL ||
   'https://meditwin-digital-twin.onrender.com/api/v1';
 
@@ -33,6 +34,7 @@ const API_URL =
 export const api = axios.create({
   baseURL: API_BASE,
   timeout: 60000,
+  withCredentials: true,
 });
 
 
@@ -98,6 +100,7 @@ api.interceptors.request.use(
      * Do NOT manually set multipart/form-data.
      * Browser must generate the boundary automatically.
      */
+
     if (config.data instanceof FormData) {
       delete config.headers?.['Content-Type'];
     } else {
@@ -127,8 +130,8 @@ const explain = (error) => {
    * {
    *   success: false,
    *   error: {
-   *      message: "...",
-   *      details: {...}
+   *     message: "...",
+   *     details: {...}
    *   }
    * }
    */
@@ -153,7 +156,7 @@ const explain = (error) => {
     error?.code === 'ERR_NETWORK' ||
     !response
   ) {
-    return 'Cannot reach the backend server. Make sure MediTwin backend is running on port 5000.';
+    return 'Cannot reach the backend server. Check that the MediTwin backend is running and the API URL is configured correctly.';
   }
 
   switch (response.status) {
@@ -215,9 +218,7 @@ api.interceptors.response.use(
     }
 
     /*
-     * IMPORTANT:
-     *
-     * Keep the original status/data available for debugging,
+     * Keep original status/data available for debugging,
      * but expose a useful Error message to React.
      */
 
@@ -382,8 +383,12 @@ export const robots = {
 */
 
 export const waste = {
+
   list: (params = {}) => {
-    const cleanParams = { ...params };
+
+    const cleanParams = {
+      ...params,
+    };
 
     // Never send the demo placeholder to MongoDB
     if (
@@ -393,23 +398,44 @@ export const waste = {
       delete cleanParams.hospitalId;
     }
 
-    return getFull('/waste', cleanParams);
+    return getFull(
+      '/waste',
+      cleanParams
+    );
   },
 
-  one: (id) => get(`/waste/${id}`),
 
-  create: (body) => post('/waste', body),
+  one: (id) =>
+    get(`/waste/${id}`),
 
-  reclassify: (id, category, reason) =>
-    patch(`/waste/${id}/category`, {
-      category,
-      reason,
-    }),
 
-  remove: (id) => del(`/waste/${id}`),
+  create: (body) =>
+    post('/waste', body),
+
+
+  reclassify: (
+    id,
+    category,
+    reason
+  ) =>
+    patch(
+      `/waste/${id}/category`,
+      {
+        category,
+        reason,
+      }
+    ),
+
+
+  remove: (id) =>
+    del(`/waste/${id}`),
+
 
   exportCsv: (params = {}) => {
-    const cleanParams = { ...params };
+
+    const cleanParams = {
+      ...params,
+    };
 
     if (
       !cleanParams.hospitalId ||
@@ -567,7 +593,9 @@ export const compartments = {
   ) =>
     post(
       `/compartments/${id}/schedule-disposal`,
-      { note }
+      {
+        note,
+      }
     ),
 
   empty: (
