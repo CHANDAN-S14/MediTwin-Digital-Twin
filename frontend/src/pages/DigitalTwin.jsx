@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import {
   OrbitControls,
-  Environment,
+  
   Grid,
   Text,
   Float,
@@ -223,7 +223,7 @@ function Scene({ robot, wasteVisible, wastePosition }) {
         intensity={2}
       />
 
-      <Environment preset="city" />
+      
 
       <Floor />
 
