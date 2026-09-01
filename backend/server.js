@@ -16,7 +16,7 @@ const start = async () => {
 
 initializeSocket(server);
 
-  server.listen(env.port, () => {
+  server.listen(env.port, '0.0.0.0',  () => {
     logger.info(
       `MediTwin API listening on http://localhost:${env.port} (${env.nodeEnv})`
     );
