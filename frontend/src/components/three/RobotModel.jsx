@@ -1,8 +1,16 @@
-import React, { useEffect, useRef } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
-import { useFrame } from "@react-three/fiber";
+import {
+  useFrame,
+} from "@react-three/fiber";
 
-import { RoundedBox } from "@react-three/drei";
+import {
+  RoundedBox,
+} from "@react-three/drei";
 
 import socket, {
   connectDigitalTwin,
@@ -14,11 +22,20 @@ function Wheel({ position }) {
   return (
     <mesh
       position={position}
-      rotation={[Math.PI / 2, 0, 0]}
+      rotation={[
+        Math.PI / 2,
+        0,
+        0,
+      ]}
       castShadow
     >
       <cylinderGeometry
-        args={[0.35, 0.35, 0.22, 32]}
+        args={[
+          0.35,
+          0.35,
+          0.22,
+          32,
+        ]}
       />
 
       <meshStandardMaterial
@@ -36,9 +53,16 @@ function RobotModel() {
 
   const lightRef = useRef(null);
 
+  const [targetPosition, setTargetPosition] =
+    useState({
+      x: 0,
+      y: 0.8,
+      z: 0,
+    });
+
 
   /* ============================================================
-     SOCKET.IO ROBOT POSITION
+     SOCKET CONNECTION
   ============================================================ */
 
   useEffect(() => {
@@ -48,51 +72,39 @@ function RobotModel() {
 
     const handlePosition = (data) => {
 
-      console.log("Robot position received:", data);
+      console.log(
+        "📍 FRONTEND ROBOT POSITION:",
+        data
+      );
 
 
-      if (!data) return;
-
-      /*
-       * Backend sends:
-       *
-       * {
-       *   robotId: "MB-01",
-       *   position: {
-       *     x,
-       *     y,
-       *     z
-       *   }
-       * }
-       */
-
-      const position = data.position;
-
-      if (!position) return;
-
-
-      if (!robotRef.current) return;
-
-
-      const x = Number(position.x);
-
-      const y = Number(position.y);
-
-      const z = Number(position.z);
-
-
-      if (Number.isFinite(x)) {
-        robotRef.current.position.x = x;
+      // Only control MEDI-001
+      if (
+        data?.robotId !== "MEDI-001"
+      ) {
+        return;
       }
 
-      if (Number.isFinite(y)) {
-        robotRef.current.position.y = y + 0.8;
+
+      if (!data?.position) {
+        return;
       }
 
-      if (Number.isFinite(z)) {
-        robotRef.current.position.z = z;
-      }
 
+      setTargetPosition({
+        x: Number(
+          data.position.x
+        ) || 0,
+
+        y:
+          Number(
+            data.position.y
+          ) || 0.8,
+
+        z: Number(
+          data.position.z
+        ) || 0,
+      });
     };
 
 
@@ -117,49 +129,62 @@ function RobotModel() {
 
 
   /* ============================================================
-     ROBOT ANIMATION
+     SMOOTH ROBOT MOVEMENT
   ============================================================ */
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
 
-    const time =
-      state.clock.getElapsedTime();
-
-
-    /*
-     * Small floating animation.
-     *
-     * IMPORTANT:
-     * We do NOT change X or Z here.
-     *
-     * Backend controls X/Z movement.
-     */
-
-    if (robotRef.current) {
-
-      /*
-       * Keep the robot slightly floating.
-       */
-
-      const baseY = 0.8;
-
-      robotRef.current.position.y =
-        baseY +
-        Math.sin(time * 1.5) * 0.03;
-
+    if (!robotRef.current) {
+      return;
     }
 
 
-    /* ==========================================================
-       STATUS LIGHT ANIMATION
-    ========================================================== */
+    const robot =
+      robotRef.current;
 
+
+    // Smooth movement
+    robot.position.x +=
+      (
+        targetPosition.x -
+        robot.position.x
+      ) *
+      Math.min(
+        delta * 5,
+        1
+      );
+
+
+    robot.position.z +=
+      (
+        targetPosition.z -
+        robot.position.z
+      ) *
+      Math.min(
+        delta * 5,
+        1
+      );
+
+
+    // Keep robot slightly floating
+    robot.position.y =
+      targetPosition.y +
+      Math.sin(
+        state.clock.getElapsedTime() *
+        1.5
+      ) *
+      0.03;
+
+
+    // Status light animation
     if (lightRef.current) {
 
       lightRef.current.intensity =
         2 +
-        Math.sin(time * 5);
-
+        Math.sin(
+          state.clock.getElapsedTime() *
+          5
+        );
     }
 
   });
@@ -169,15 +194,23 @@ function RobotModel() {
 
     <group
       ref={robotRef}
-      position={[0, 0.8, 0]}
+      position={[
+        0,
+        0.8,
+        0,
+      ]}
     >
 
-      {/* ======================================================
-          MAIN ROBOT BODY
-      ====================================================== */}
+      {/* =====================================================
+          MAIN BODY
+      ===================================================== */}
 
       <RoundedBox
-        args={[3.2, 1.8, 2.2]}
+        args={[
+          3.2,
+          1.8,
+          2.2,
+        ]}
         radius={0.25}
         smoothness={4}
         castShadow
@@ -193,15 +226,23 @@ function RobotModel() {
       </RoundedBox>
 
 
-      {/* ======================================================
+      {/* =====================================================
           TOP UNIT
-      ====================================================== */}
+      ===================================================== */}
 
       <RoundedBox
-        args={[2.3, 0.55, 1.5]}
+        args={[
+          2.3,
+          0.55,
+          1.5,
+        ]}
         radius={0.15}
         smoothness={4}
-        position={[0, 1.15, 0]}
+        position={[
+          0,
+          1.15,
+          0,
+        ]}
         castShadow
       >
 
@@ -214,16 +255,25 @@ function RobotModel() {
       </RoundedBox>
 
 
-      {/* ======================================================
-          FRONT CAMERA
-      ====================================================== */}
+      {/* =====================================================
+          CAMERA
+      ===================================================== */}
 
       <mesh
-        position={[0, 1.15, 0.78]}
+        position={[
+          0,
+          1.15,
+          0.78,
+        ]}
       >
 
         <cylinderGeometry
-          args={[0.25, 0.25, 0.15, 32]}
+          args={[
+            0.25,
+            0.25,
+            0.15,
+            32,
+          ]}
         />
 
         <meshStandardMaterial
@@ -235,14 +285,20 @@ function RobotModel() {
       </mesh>
 
 
-      {/* CAMERA LENS */}
-
       <mesh
-        position={[0, 1.15, 0.88]}
+        position={[
+          0,
+          1.15,
+          0.88,
+        ]}
       >
 
         <sphereGeometry
-          args={[0.12, 32, 32]}
+          args={[
+            0.12,
+            32,
+            32,
+          ]}
         />
 
         <meshStandardMaterial
@@ -254,13 +310,17 @@ function RobotModel() {
       </mesh>
 
 
-      {/* ======================================================
+      {/* =====================================================
           STATUS LIGHT
-      ====================================================== */}
+      ===================================================== */}
 
       <pointLight
         ref={lightRef}
-        position={[0, 1.65, 0]}
+        position={[
+          0,
+          1.65,
+          0,
+        ]}
         color="#22c55e"
         intensity={3}
         distance={3}
@@ -268,11 +328,19 @@ function RobotModel() {
 
 
       <mesh
-        position={[0, 1.65, 0]}
+        position={[
+          0,
+          1.65,
+          0,
+        ]}
       >
 
         <sphereGeometry
-          args={[0.09, 20, 20]}
+          args={[
+            0.09,
+            20,
+            20,
+          ]}
         />
 
         <meshStandardMaterial
@@ -284,16 +352,24 @@ function RobotModel() {
       </mesh>
 
 
-      {/* ======================================================
+      {/* =====================================================
           WASTE COMPARTMENTS
-      ====================================================== */}
+      ===================================================== */}
 
       <mesh
-        position={[-0.85, 0.05, 1.12]}
+        position={[
+          -0.85,
+          0.05,
+          1.12,
+        ]}
       >
 
         <boxGeometry
-          args={[1.2, 1.2, 0.12]}
+          args={[
+            1.2,
+            1.2,
+            0.12,
+          ]}
         />
 
         <meshStandardMaterial
@@ -306,11 +382,19 @@ function RobotModel() {
 
 
       <mesh
-        position={[0.85, 0.05, 1.12]}
+        position={[
+          0.85,
+          0.05,
+          1.12,
+        ]}
       >
 
         <boxGeometry
-          args={[1.2, 1.2, 0.12]}
+          args={[
+            1.2,
+            1.2,
+            0.12,
+          ]}
         />
 
         <meshStandardMaterial
@@ -322,37 +406,61 @@ function RobotModel() {
       </mesh>
 
 
-      {/* ======================================================
+      {/* =====================================================
           WHEELS
-      ====================================================== */}
+      ===================================================== */}
 
       <Wheel
-        position={[-1.25, -0.95, 0.9]}
+        position={[
+          -1.25,
+          -0.95,
+          0.9,
+        ]}
       />
 
       <Wheel
-        position={[1.25, -0.95, 0.9]}
+        position={[
+          1.25,
+          -0.95,
+          0.9,
+        ]}
       />
 
       <Wheel
-        position={[-1.25, -0.95, -0.9]}
+        position={[
+          -1.25,
+          -0.95,
+          -0.9,
+        ]}
       />
 
       <Wheel
-        position={[1.25, -0.95, -0.9]}
+        position={[
+          1.25,
+          -0.95,
+          -0.9,
+        ]}
       />
 
 
-      {/* ======================================================
+      {/* =====================================================
           FRONT SENSOR
-      ====================================================== */}
+      ===================================================== */}
 
       <mesh
-        position={[0, -0.25, 1.15]}
+        position={[
+          0,
+          -0.25,
+          1.15,
+        ]}
       >
 
         <boxGeometry
-          args={[1.5, 0.25, 0.1]}
+          args={[
+            1.5,
+            0.25,
+            0.1,
+          ]}
         />
 
         <meshStandardMaterial
@@ -363,7 +471,6 @@ function RobotModel() {
       </mesh>
 
     </group>
-
   );
 }
 
