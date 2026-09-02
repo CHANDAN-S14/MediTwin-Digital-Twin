@@ -56,7 +56,7 @@ function Viewport() {
         />
 
         {/* Robot */}
-        <RobotModel />
+        <RobotModel robotId="MB-01" />
 
         {/* Camera Controls */}
         <OrbitControls
