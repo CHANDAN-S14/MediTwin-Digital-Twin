@@ -152,10 +152,7 @@ export function emitRobotStatus(
    ROBOT POSITION
 ============================================================ */
 
-export function emitRobotPosition(
-  robotId,
-  position
-) {
+export function emitRobotPosition(robotId, position) {
   if (!io) {
     console.warn(
       "Socket.IO not initialized"
@@ -168,7 +165,6 @@ export function emitRobotPosition(
     EVENTS.ROBOT_POSITION,
     {
       robotId,
-
       position: {
         x: Number(position?.x) || 0,
         y: Number(position?.y) || 0,
