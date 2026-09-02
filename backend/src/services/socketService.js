@@ -127,64 +127,44 @@ export function emitToHospital(
    ROBOT STATUS
 ============================================================ */
 
-export function emitRobotStatus(
-  robotId,
-  data = {}
-) {
+export function emitRobotStatus(robotId, data) {
   if (!io) {
-    console.warn(
-      "Socket.IO not initialized"
-    );
-
+    console.warn("Socket.IO not initialized");
     return;
   }
 
-  io.emit(
-    EVENTS.ROBOT_STATUS,
-    {
-      robotId,
-      ...data,
-    }
-  );
+  io.emit(EVENTS.ROBOT_STATUS, {
+    robotId,
+    ...data,
+  });
 }
-
 /* ============================================================
    ROBOT POSITION
 ============================================================ */
-
 export function emitRobotPosition(robotId, position) {
   if (!io) {
-    console.warn(
-      "Socket.IO not initialized"
-    );
-
+    console.warn("Socket.IO not initialized");
     return;
   }
 
-  io.emit(
-    EVENTS.ROBOT_POSITION,
-    {
-      robotId,
-      position: {
-        x: Number(position?.x) || 0,
-        y: Number(position?.y) || 0,
-        z: Number(position?.z) || 0,
-      },
-    }
-  );
+  io.emit(EVENTS.ROBOT_POSITION, {
+    robotId,
+    position: {
+      x: Number(position?.x) || 0,
+      y: Number(position?.y) || 0,
+      z: Number(position?.z) || 0,
+    },
+  });
 }
 
 /* ============================================================
    DIGITAL TWIN UPDATE
 ============================================================ */
 
-export function emitDigitalTwinUpdate(
-  robotId,
-  data = {}
-) {
+export function emitDigitalTwinUpdate(robotId, data) {
   if (!io) {
     console.warn(
-      "Socket.IO not initialized."
+      "Socket.IO not initialized. Digital Twin update skipped."
     );
 
     return;
@@ -200,12 +180,11 @@ export function emitDigitalTwinUpdate(
     payload
   );
 
-  if (payload.position) {
+  if (payload?.position) {
     io.emit(
       EVENTS.ROBOT_POSITION,
       {
         robotId,
-
         position: {
           x: Number(payload.position.x) || 0,
           y: Number(payload.position.y) || 0,
@@ -220,7 +199,6 @@ export function emitDigitalTwinUpdate(
     payload
   );
 }
-
 /* ============================================================
    WASTE COLLECTED
 ============================================================ */
