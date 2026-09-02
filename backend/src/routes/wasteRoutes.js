@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router } from "express";
 
 import {
   listWaste,
@@ -7,68 +7,63 @@ import {
   reclassifyWaste,
   deleteWaste,
   exportWaste,
-} from '../controllers/wasteController.js';
-
-import { requireRole } from '../middleware/auth.js';
+} from "../controllers/wasteController.js";
 
 const router = Router();
-
 
 /*
 |--------------------------------------------------------------------------
 | DEMO MODE
 |--------------------------------------------------------------------------
+| Waste Management is intentionally available without login.
 |
-| No login required for:
+| This allows:
 |
-| GET    /waste
-| POST   /waste
-| GET    /waste/:id
-| PATCH  /waste/:id/category
-| GET    /waste/export
+| Scanner
+|   ↓
+| AI Classification
+|   ↓
+| Human Confirmation
+|   ↓
+| Robot Dispatch
+|   ↓
+| Waste Management
 |
+| No authentication is required for this demo workflow.
+|--------------------------------------------------------------------------
 */
 
-
-router.get(
-  '/export',
-  exportWaste
-);
-
-
-router.get(
-  '/',
-  listWaste
-);
-
-
-router.post(
-  '/',
-  createWaste
-);
-
-
-router.get(
-  '/:id',
-  getWaste
-);
-
-
-router.patch(
-  '/:id/category',
-  reclassifyWaste
-);
-
+/*
+ * GET /api/v1/waste/export
+ */
+router.get("/export", exportWaste);
 
 /*
- * Keep deletion protected.
+ * GET /api/v1/waste
  */
+router.get("/", listWaste);
 
-router.delete(
-  '/:id',
-  requireRole('admin'),
-  deleteWaste
-);
+/*
+ * POST /api/v1/waste
+ */
+router.post("/", createWaste);
 
+/*
+ * GET /api/v1/waste/:id
+ */
+router.get("/:id", getWaste);
+
+/*
+ * PATCH /api/v1/waste/:id/category
+ */
+router.patch("/:id/category", reclassifyWaste);
+
+/*
+ * DELETE /api/v1/waste/:id
+ *
+ * In demo mode deletion is allowed without authentication.
+ * If you later enable authentication, protect this route.
+ */
+router.delete("/:id", deleteWaste);
 
 export default router;
