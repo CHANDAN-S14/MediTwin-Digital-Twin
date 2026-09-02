@@ -94,52 +94,66 @@ res.json({
  * Hospital is NOT required.
  */
 export const dispatchRobot = asyncHandler(async (req, res) => {
-  const { robotId } = req.params;
-
   const {
+    robotId: requestedRobotId,
     department = 'OT',
     expectedCategory = 'general',
     confidence = 1,
     wasteId = null,
   } = req.body || {};
 
-  if (!robotId) {
-    throw ApiError.badRequest('Robot ID is required');
+  let robot;
+
+  // If frontend specifies a robot, use it.
+  if (requestedRobotId) {
+    robot = await Robot.findOne({
+      robotId: requestedRobotId,
+    });
+  } else {
+    // Otherwise automatically find an available robot.
+    robot = await Robot.findOne({
+      status: 'IDLE',
+      battery: { $gt: 15 },
+    }).sort({
+      battery: -1,
+    });
   }
 
-  const robot = await Robot.findOne({ robotId });
-
   if (!robot) {
-    throw ApiError.notFound(
-      `Robot ${robotId} not found`
+    throw ApiError.conflict(
+      'No available robot was found. Make sure at least one robot is IDLE and has enough battery.'
     );
   }
 
   if (robot.status !== 'IDLE') {
     throw ApiError.conflict(
-      `Robot ${robotId} is currently ${robot.status}`
+      `Robot ${robot.robotId} is currently ${robot.status}`
     );
   }
 
   if (Number(robot.battery ?? 0) <= 15) {
     throw ApiError.conflict(
-      `Robot ${robotId} does not have enough battery`
+      `Robot ${robot.robotId} does not have enough battery`
     );
   }
 
-  const category = [
+  const validCategories = [
     'yellow',
     'red',
     'blue',
     'general',
-  ].includes(expectedCategory)
+  ];
+
+  const category = validCategories.includes(
+    expectedCategory
+  )
     ? expectedCategory
     : 'general';
 
   const task = await startCollection({
     hospitalId: robot.hospitalId ?? null,
 
-    robotId,
+    robotId: robot.robotId,
 
     department: department || 'OT',
 
@@ -150,8 +164,6 @@ export const dispatchRobot = asyncHandler(async (req, res) => {
     wasteId,
 
     requestedBy: req.user?._id ?? null,
-
-    actor: req.user ?? null,
   });
 
   res.status(201).json({
@@ -161,9 +173,13 @@ export const dispatchRobot = asyncHandler(async (req, res) => {
 
     data: {
       task,
-      robotId,
+
+      robotId: robot.robotId,
+
       department: department || 'OT',
+
       expectedCategory: category,
+
       wasteId,
     },
   });
