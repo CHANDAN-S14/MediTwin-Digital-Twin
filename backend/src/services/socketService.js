@@ -2,10 +2,6 @@ import { Server } from "socket.io";
 
 let io = null;
 
-/* ============================================================
-   SOCKET EVENTS
-============================================================ */
-
 export const EVENTS = {
   ROBOT_STATUS: "robot:status",
   ROBOT_POSITION: "robot:position",
@@ -14,15 +10,10 @@ export const EVENTS = {
   WASTE_DEPOSITED: "waste:deposited",
 
   TASK_UPDATED: "task:updated",
-
   WASTE_UPDATED: "waste:updated",
 
   DIGITAL_TWIN_UPDATE: "digitalTwin:update",
 };
-
-/* ============================================================
-   INITIALIZE SOCKET.IO
-============================================================ */
 
 export function initializeSocket(server) {
   io = new Server(server, {
@@ -46,7 +37,7 @@ export function initializeSocket(server) {
   });
 
   io.on("connection", (socket) => {
-    console.log("Socket connected:", socket.id);
+    console.log("🔌 Socket connected:", socket.id);
 
     socket.on("join:hospital", (hospitalId) => {
       if (!hospitalId) return;
@@ -76,14 +67,10 @@ export function initializeSocket(server) {
     });
   });
 
-  console.log("Socket.IO initialized");
+  console.log("✅ Socket.IO initialized");
 
   return io;
 }
-
-/* ============================================================
-   GET SOCKET.IO INSTANCE
-============================================================ */
 
 export function getIO() {
   if (!io) {
@@ -106,10 +93,9 @@ export function emitToHospital(
 ) {
   if (!io) {
     console.warn(
-      "Socket.IO not initialized. Event skipped:",
+      "Socket.IO not initialized:",
       event
     );
-
     return;
   }
 
@@ -127,46 +113,74 @@ export function emitToHospital(
    ROBOT STATUS
 ============================================================ */
 
-export function emitRobotStatus(robotId, data) {
+export function emitRobotStatus(
+  robotId,
+  data
+) {
   if (!io) {
-    console.warn("Socket.IO not initialized");
+    console.warn(
+      "Socket.IO not initialized"
+    );
     return;
   }
 
-  io.emit(EVENTS.ROBOT_STATUS, {
-    robotId,
-    ...data,
-  });
+  io.emit(
+    EVENTS.ROBOT_STATUS,
+    {
+      robotId,
+      ...data,
+    }
+  );
 }
+
 /* ============================================================
    ROBOT POSITION
 ============================================================ */
-export function emitRobotPosition(robotId, position) {
+
+export function emitRobotPosition(
+  robotId,
+  position
+) {
   if (!io) {
-    console.warn("Socket.IO not initialized");
+    console.warn(
+      "Socket.IO not initialized"
+    );
     return;
   }
 
-  io.emit(EVENTS.ROBOT_POSITION, {
+  const payload = {
     robotId,
+
     position: {
       x: Number(position?.x) || 0,
       y: Number(position?.y) || 0,
       z: Number(position?.z) || 0,
     },
-  });
+  };
+
+  console.log(
+    "📍 Robot position:",
+    payload
+  );
+
+  io.emit(
+    EVENTS.ROBOT_POSITION,
+    payload
+  );
 }
 
 /* ============================================================
    DIGITAL TWIN UPDATE
 ============================================================ */
 
-export function emitDigitalTwinUpdate(robotId, data) {
+export function emitDigitalTwinUpdate(
+  robotId,
+  data
+) {
   if (!io) {
     console.warn(
-      "Socket.IO not initialized. Digital Twin update skipped."
+      "Socket.IO not initialized"
     );
-
     return;
   }
 
@@ -176,29 +190,11 @@ export function emitDigitalTwinUpdate(robotId, data) {
   };
 
   io.emit(
-    EVENTS.ROBOT_STATUS,
-    payload
-  );
-
-  if (payload?.position) {
-    io.emit(
-      EVENTS.ROBOT_POSITION,
-      {
-        robotId,
-        position: {
-          x: Number(payload.position.x) || 0,
-          y: Number(payload.position.y) || 0,
-          z: Number(payload.position.z) || 0,
-        },
-      }
-    );
-  }
-
-  io.emit(
     EVENTS.DIGITAL_TWIN_UPDATE,
     payload
   );
 }
+
 /* ============================================================
    WASTE COLLECTED
 ============================================================ */
