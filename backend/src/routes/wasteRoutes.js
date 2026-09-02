@@ -1,30 +1,45 @@
 import { Router } from 'express';
+
 import {
-  listWaste, getWaste, createWaste, reclassifyWaste, deleteWaste, exportWaste,
+  listWaste,
+  getWaste,
+  createWaste,
+  reclassifyWaste,
+  deleteWaste,
+  exportWaste,
 } from '../controllers/wasteController.js';
-import { requireAuth, requireRole, requireHospital } from '../middleware/auth.js';
+
+import { requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
-router.use(requireAuth, requireHospital);
+/*
+ * ============================================================
+ * DEMO MODE
+ * ============================================================
+ *
+ * Waste Management is available without login for the SIH demo.
+ *
+ * IMPORTANT:
+ * Delete remains admin-only.
+ */
 
-// Declared before /:id so "export" is not swallowed as a waste identifier.
+// GET all waste
+router.get('/', listWaste);
+
+// GET CSV export
 router.get('/export', exportWaste);
 
-router.get('/', listWaste);
+// CREATE waste
 router.post('/', createWaste);
+
+// GET one waste record
 router.get('/:id', getWaste);
 
-/**
- * Correcting a category is the whole point of human oversight, so any signed-in
- * user may do it. The previous value is preserved on the record either way.
- */
+// UPDATE category
 router.patch('/:id/category', reclassifyWaste);
 
-/**
- * Deletion is admin-only. These records are a regulated register — removing one
- * is closer to amending a legal document than to tidying a list.
- */
+// DELETE remains protected
 router.delete('/:id', requireRole('admin'), deleteWaste);
 
 export default router;
