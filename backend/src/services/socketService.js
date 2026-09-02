@@ -48,10 +48,6 @@ export function initializeSocket(server) {
   io.on("connection", (socket) => {
     console.log("Socket connected:", socket.id);
 
-    /* --------------------------------------------------------
-       Join hospital room
-    -------------------------------------------------------- */
-
     socket.on("join:hospital", (hospitalId) => {
       if (!hospitalId) return;
 
@@ -64,10 +60,6 @@ export function initializeSocket(server) {
       );
     });
 
-    /* --------------------------------------------------------
-       Digital Twin room
-    -------------------------------------------------------- */
-
     socket.on("digitalTwin:join", () => {
       socket.join("digital-twin");
 
@@ -75,10 +67,6 @@ export function initializeSocket(server) {
         `Socket ${socket.id} joined digital-twin`
       );
     });
-
-    /* --------------------------------------------------------
-       Disconnect
-    -------------------------------------------------------- */
 
     socket.on("disconnect", (reason) => {
       console.log(
@@ -108,7 +96,7 @@ export function getIO() {
 }
 
 /* ============================================================
-   EMIT TO HOSPITAL
+   HOSPITAL
 ============================================================ */
 
 export function emitToHospital(
@@ -126,10 +114,6 @@ export function emitToHospital(
   }
 
   if (!hospitalId) {
-    console.warn(
-      "emitToHospital called without hospitalId"
-    );
-
     return;
   }
 
@@ -143,7 +127,10 @@ export function emitToHospital(
    ROBOT STATUS
 ============================================================ */
 
-export function emitRobotStatus(data) {
+export function emitRobotStatus(
+  robotId,
+  data = {}
+) {
   if (!io) {
     console.warn(
       "Socket.IO not initialized"
@@ -154,7 +141,10 @@ export function emitRobotStatus(data) {
 
   io.emit(
     EVENTS.ROBOT_STATUS,
-    data
+    {
+      robotId,
+      ...data,
+    }
   );
 }
 
@@ -162,7 +152,10 @@ export function emitRobotStatus(data) {
    ROBOT POSITION
 ============================================================ */
 
-export function emitRobotPosition(data) {
+export function emitRobotPosition(
+  robotId,
+  position
+) {
   if (!io) {
     console.warn(
       "Socket.IO not initialized"
@@ -173,7 +166,15 @@ export function emitRobotPosition(data) {
 
   io.emit(
     EVENTS.ROBOT_POSITION,
-    data
+    {
+      robotId,
+
+      position: {
+        x: Number(position?.x) || 0,
+        y: Number(position?.y) || 0,
+        z: Number(position?.z) || 0,
+      },
+    }
   );
 }
 
@@ -181,47 +182,46 @@ export function emitRobotPosition(data) {
    DIGITAL TWIN UPDATE
 ============================================================ */
 
-export function emitDigitalTwinUpdate(data) {
+export function emitDigitalTwinUpdate(
+  robotId,
+  data = {}
+) {
   if (!io) {
     console.warn(
-      "Socket.IO not initialized. Digital Twin update skipped."
+      "Socket.IO not initialized."
     );
 
     return;
   }
 
-  /* Robot status */
+  const payload = {
+    robotId,
+    ...data,
+  };
 
   io.emit(
     EVENTS.ROBOT_STATUS,
-    data
+    payload
   );
 
-  /* Robot position */
-
-  if (data?.position) {
+  if (payload.position) {
     io.emit(
       EVENTS.ROBOT_POSITION,
       {
-        robotId:
-          data.robotId || "MB-01",
+        robotId,
 
         position: {
-          x: Number(data.position.x) || 0,
-
-          y: Number(data.position.y) || 0,
-
-          z: Number(data.position.z) || 0,
+          x: Number(payload.position.x) || 0,
+          y: Number(payload.position.y) || 0,
+          z: Number(payload.position.z) || 0,
         },
       }
     );
   }
 
-  /* Digital Twin event */
-
   io.emit(
     EVENTS.DIGITAL_TWIN_UPDATE,
-    data
+    payload
   );
 }
 
@@ -230,20 +230,12 @@ export function emitDigitalTwinUpdate(data) {
 ============================================================ */
 
 export function emitWasteCollected(data) {
-  if (!io) {
-    console.warn(
-      "Socket.IO not initialized"
-    );
-
-    return;
-  }
+  if (!io) return;
 
   io.emit(
     EVENTS.WASTE_COLLECTED,
     data
   );
-
-  /* Also notify hospital */
 
   if (data?.hospitalId) {
     emitToHospital(
@@ -259,13 +251,7 @@ export function emitWasteCollected(data) {
 ============================================================ */
 
 export function emitWasteDeposited(data) {
-  if (!io) {
-    console.warn(
-      "Socket.IO not initialized"
-    );
-
-    return;
-  }
+  if (!io) return;
 
   io.emit(
     EVENTS.WASTE_DEPOSITED,
@@ -286,13 +272,7 @@ export function emitWasteDeposited(data) {
 ============================================================ */
 
 export function emitTaskUpdated(data) {
-  if (!io) {
-    console.warn(
-      "Socket.IO not initialized"
-    );
-
-    return;
-  }
+  if (!io) return;
 
   io.emit(
     EVENTS.TASK_UPDATED,
@@ -313,13 +293,7 @@ export function emitTaskUpdated(data) {
 ============================================================ */
 
 export function emitWasteUpdated(data) {
-  if (!io) {
-    console.warn(
-      "Socket.IO not initialized"
-    );
-
-    return;
-  }
+  if (!io) return;
 
   io.emit(
     EVENTS.WASTE_UPDATED,
