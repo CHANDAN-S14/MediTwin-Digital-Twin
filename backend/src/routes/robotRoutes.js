@@ -1,4 +1,5 @@
 import { Router } from 'express';
+
 import {
   listRobots,
   getRobot,
@@ -9,24 +10,28 @@ import {
   clearRobotStop,
 } from '../controllers/robotController.js';
 
-import { requireAuth } from '../middleware/auth.js';
-
 const router = Router();
 
-// Authentication is still required.
-// Hospital registration is NOT required for the demo.
-router.get('/', requireAuth, listRobots);
+/*
+ * DEMO MODE
+ *
+ * Robot operations do NOT require authentication.
+ * This allows the MediTwin digital-twin simulation
+ * to work without login credentials.
+ */
 
-router.get('/:robotId', requireAuth, getRobot);
+router.get('/', listRobots);
 
-router.get('/:robotId/telemetry', requireAuth, getTelemetry);
+router.get('/:robotId', getRobot);
 
-router.post('/:robotId/dispatch', requireAuth, dispatchRobot);
+router.get('/:robotId/telemetry', getTelemetry);
 
-router.post('/:robotId/recall', requireAuth, recallRobot);
+router.post('/:robotId/dispatch', dispatchRobot);
 
-router.post('/:robotId/stop', requireAuth, stopRobot);
+router.post('/:robotId/recall', recallRobot);
 
-router.post('/:robotId/clear-stop', requireAuth, clearRobotStop);
+router.post('/:robotId/stop', stopRobot);
+
+router.post('/:robotId/clear-stop', clearRobotStop);
 
 export default router;
