@@ -333,14 +333,45 @@ const del = (
 
 export const auth = {
 
-  login: (
-    email,
-    password
-  ) =>
-    post('/auth/login', {
-      email,
-      password,
-    }),
+api.interceptors.request.use(
+  (config) => {
+    const token = getToken();
+
+    console.log(
+      'API REQUEST:',
+      config.method?.toUpperCase(),
+      config.baseURL + config.url
+    );
+
+    console.log(
+      'TOKEN EXISTS:',
+      !!token
+    );
+
+    if (token) {
+      config.headers = config.headers || {};
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    if (
+      config.data &&
+      !(config.data instanceof FormData)
+    ) {
+      config.headers = config.headers || {};
+      config.headers['Content-Type'] =
+        'application/json';
+    }
+
+    if (config.data instanceof FormData) {
+      if (config.headers) {
+        delete config.headers['Content-Type'];
+      }
+    }
+
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
   register: (
     payload
