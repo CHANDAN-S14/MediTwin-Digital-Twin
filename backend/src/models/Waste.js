@@ -1,109 +1,267 @@
-import mongoose from 'mongoose';
-import { WASTE_CATEGORIES } from './constants.js';
+import mongoose from "mongoose";
 
-const alternativeSchema = new mongoose.Schema(
+const WasteSchema = new mongoose.Schema(
   {
-    category: {
-      type: String,
-      enum: WASTE_CATEGORIES,
-    },
-    confidence: {
-      type: Number,
-      min: 0,
-      max: 1,
-    },
-  },
-  { _id: false }
-);
-
-const wasteSchema = new mongoose.Schema(
-  {
+    /*
+    |--------------------------------------------------------------------------
+    | Waste ID
+    |--------------------------------------------------------------------------
+    | Example:
+    | MW-0001
+    | MW-0002
+    */
     wasteId: {
       type: String,
       required: true,
       unique: true,
       index: true,
+      trim: true,
+      uppercase: true,
     },
 
     /*
-     * Hospital is OPTIONAL.
-     *
-     * This allows a newly registered user to use the AI scanner
-     * without first creating/joining a hospital.
-     */
-  hospitalId: {
-  type: mongoose.Schema.Types.ObjectId,
-  ref: 'Hospital',
-  required: false,
-  default: null,
-  index: true,
-},
+    |--------------------------------------------------------------------------
+    | Hospital
+    |--------------------------------------------------------------------------
+    |
+    | Optional in demo mode.
+    |
+    */
+    hospitalId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Hospital",
+      required: false,
+      index: true,
+    },
 
+    /*
+    |--------------------------------------------------------------------------
+    | Waste Category
+    |--------------------------------------------------------------------------
+    |
+    | yellow
+    | red
+    | blue
+    | general
+    |
+    */
     category: {
       type: String,
-      enum: WASTE_CATEGORIES,
       required: true,
+      lowercase: true,
+      trim: true,
+      enum: [
+        "yellow",
+        "red",
+        "blue",
+        "general",
+      ],
+      index: true,
     },
 
-    categoryLabel: {
+    /*
+    |--------------------------------------------------------------------------
+    | Original AI Category
+    |--------------------------------------------------------------------------
+    |
+    | Preserves the first AI prediction even if a human changes it.
+    |
+    */
+    originalCategory: {
       type: String,
+      lowercase: true,
+      trim: true,
+      enum: [
+        "yellow",
+        "red",
+        "blue",
+        "general",
+      ],
+      default: null,
     },
 
+    /*
+    |--------------------------------------------------------------------------
+    | Item Type
+    |--------------------------------------------------------------------------
+    */
     itemType: {
       type: String,
-      required: true,
-      default: 'Classified item',
+      trim: true,
+      default: "Biomedical Waste",
     },
 
-    confidence: {
-      type: Number,
-      required: true,
-      min: 0,
-      max: 1,
-    },
-
-    alternatives: {
-      type: [alternativeSchema],
-      default: [],
-    },
-
+    /*
+    |--------------------------------------------------------------------------
+    | Weight
+    |--------------------------------------------------------------------------
+    */
     weight: {
       type: Number,
-      default: 0,
       min: 0,
+      default: 0,
     },
 
+    /*
+    |--------------------------------------------------------------------------
+    | Source Department
+    |--------------------------------------------------------------------------
+    |
+    | Example:
+    | OT
+    | ICU
+    | Ward
+    | General
+    |
+    */
     sourceLocation: {
       type: String,
       trim: true,
-      default: 'Scanner Station',
+      required: true,
+      index: true,
     },
 
-    compartmentSlot: {
+    /*
+    |--------------------------------------------------------------------------
+    | Robot
+    |--------------------------------------------------------------------------
+    */
+    robotId: {
       type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+      index: true,
     },
 
-    modelVersion: {
+    /*
+    |--------------------------------------------------------------------------
+    | Compartment
+    |--------------------------------------------------------------------------
+    */
+    compartmentId: {
       type: String,
-      default: 'unknown',
+      trim: true,
+      uppercase: true,
+      default: null,
     },
 
-    needsReview: {
-      type: Boolean,
-      default: false,
+    /*
+    |--------------------------------------------------------------------------
+    | Robot task
+    |--------------------------------------------------------------------------
+    */
+    taskId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Task",
+      default: null,
     },
 
+    /*
+    |--------------------------------------------------------------------------
+    | Status
+    |--------------------------------------------------------------------------
+    |
+    | The system can move through these states:
+    |
+    | pending
+    | confirmed
+    | dispatched
+    | moving_to_pickup
+    | arrived_at_pickup
+    | collecting
+    | moving_to_bin
+    | depositing
+    | collected
+    | disposed
+    | returning
+    | completed
+    | cancelled
+    | failed
+    |
+    */
     status: {
       type: String,
+      lowercase: true,
+      trim: true,
+      default: "pending",
       enum: [
-        'classified',
-        'pending',
-        'collected',
-        'segregated',
-        'disposed',
-        'cancelled',
+        "pending",
+        "confirmed",
+        "dispatched",
+        "moving_to_pickup",
+        "arrived_at_pickup",
+        "collecting",
+        "moving_to_bin",
+        "depositing",
+        "collected",
+        "disposed",
+        "returning",
+        "completed",
+        "cancelled",
+        "failed",
       ],
-      default: 'classified',
+      index: true,
+    },
+
+    /*
+    |--------------------------------------------------------------------------
+    | AI Confidence
+    |--------------------------------------------------------------------------
+    |
+    | Normally 0-1.
+    |
+    */
+    confidence: {
+      type: Number,
+      min: 0,
+      max: 1,
+      default: 0,
+    },
+
+    /*
+    |--------------------------------------------------------------------------
+    | Human Review
+    |--------------------------------------------------------------------------
+    */
+    reviewedByHuman: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    /*
+    |--------------------------------------------------------------------------
+    | User who reviewed it
+    |--------------------------------------------------------------------------
+    |
+    | Optional because demo mode does not require authentication.
+    |
+    */
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    /*
+    |--------------------------------------------------------------------------
+    | Collection timestamp
+    |--------------------------------------------------------------------------
+    */
+    collectedAt: {
+      type: Date,
+      default: null,
+    },
+
+    /*
+    |--------------------------------------------------------------------------
+    | Disposal timestamp
+    |--------------------------------------------------------------------------
+    */
+    disposedAt: {
+      type: Date,
+      default: null,
     },
   },
   {
@@ -111,21 +269,44 @@ const wasteSchema = new mongoose.Schema(
   }
 );
 
+
 /*
- * Generate an easy-to-read waste record.
- */
-wasteSchema.index({
+|--------------------------------------------------------------------------
+| Indexes
+|--------------------------------------------------------------------------
+*/
+
+WasteSchema.index({
   category: 1,
+  status: 1,
+});
+
+WasteSchema.index({
+  robotId: 1,
+  status: 1,
+});
+
+WasteSchema.index({
+  sourceLocation: 1,
   createdAt: -1,
 });
 
-wasteSchema.index({
-  hospitalId: 1,
+WasteSchema.index({
   createdAt: -1,
 });
+
+
+/*
+|--------------------------------------------------------------------------
+| Export
+|--------------------------------------------------------------------------
+*/
 
 const Waste =
   mongoose.models.Waste ||
-  mongoose.model('Waste', wasteSchema);
+  mongoose.model(
+    "Waste",
+    WasteSchema
+  );
 
 export default Waste;
