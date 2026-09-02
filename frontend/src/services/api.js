@@ -442,96 +442,29 @@ export const robots = {
 ============================================================ */
 
 export const waste = {
-  list: (
-    params = {}
-  ) => {
-    const cleanParams = {
-      ...params,
-    };
+  list: () =>
+    apiRequest("/api/v1/waste"),
 
-    /*
-     * Don't send fake hospital ID
-     */
-    if (
-      cleanParams.hospitalId ===
-      "DEFAULT_HOSPITAL"
-    ) {
-      delete cleanParams.hospitalId;
-    }
+  create: (payload) =>
+    apiRequest("/api/v1/waste", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
-    return getFull(
-      "/waste",
-      cleanParams
-    );
-  },
+  get: (id) =>
+    apiRequest(`/api/v1/waste/${id}`),
 
-  one: (
-    id
-  ) => {
-    return get(
-      `/waste/${id}`
-    );
-  },
+  updateCategory: (id, payload) =>
+    apiRequest(`/api/v1/waste/${id}/category`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
 
-  create: (
-    body
-  ) => {
-    return post(
-      "/waste",
-      body
-    );
-  },
-
-  reclassify: (
-    id,
-    category,
-    reason
-  ) => {
-    return patch(
-      `/waste/${id}/category`,
-      {
-        category,
-        reason,
-      }
-    );
-  },
-
-  remove: (
-    id
-  ) => {
-    return del(
-      `/waste/${id}`
-    );
-  },
-
-  exportCsv: (
-    params = {}
-  ) => {
-    const cleanParams = {
-      ...params,
-    };
-
-    if (
-      cleanParams.hospitalId ===
-      "DEFAULT_HOSPITAL"
-    ) {
-      delete cleanParams.hospitalId;
-    }
-
-    return api
-      .get(
-        "/waste/export",
-        {
-          params: cleanParams,
-          responseType: "blob",
-        }
-      )
-      .then(
-        (response) => response.data
-      );
-  },
+  delete: (id) =>
+    apiRequest(`/api/v1/waste/${id}`, {
+      method: "DELETE",
+    }),
 };
-
 /* ============================================================
    AI
 ============================================================ */
