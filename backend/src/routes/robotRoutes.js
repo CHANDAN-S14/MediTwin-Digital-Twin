@@ -12,6 +12,8 @@ import {
 
 const router = Router();
 
+// No login required for robot demo
+
 router.get('/', listRobots);
 
 router.get('/:robotId', getRobot);
