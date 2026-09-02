@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router } from "express";
 
 import {
   listRobots,
@@ -8,37 +8,50 @@ import {
   recallRobot,
   stopRobot,
   clearRobotStop,
-} from '../controllers/robotController.js';
+} from "../controllers/robotController.js";
 
 const router = Router();
 
 /*
- * DEMO MODE
- * No authentication required.
+ * ============================================================
+ * PUBLIC ROBOT DEMO API
+ * No login required.
+ * ============================================================
  */
 
-// Get all robots
-router.get('/', listRobots);
+router.get(
+  "/",
+  listRobots
+);
 
-// Automatically select an available robot
-router.post('/dispatch', dispatchRobot);
+router.get(
+  "/:robotId",
+  getRobot
+);
 
-// Get individual robot
-router.get('/:robotId', getRobot);
+router.get(
+  "/:robotId/telemetry",
+  getTelemetry
+);
 
-// Get telemetry
-router.get('/:robotId/telemetry', getTelemetry);
+router.post(
+  "/:robotId/dispatch",
+  dispatchRobot
+);
 
-// Dispatch specific robot
-router.post('/:robotId/dispatch', dispatchRobot);
+router.post(
+  "/:robotId/recall",
+  recallRobot
+);
 
-// Recall
-router.post('/:robotId/recall', recallRobot);
+router.post(
+  "/:robotId/stop",
+  stopRobot
+);
 
-// Emergency stop
-router.post('/:robotId/stop', stopRobot);
-
-// Clear stop
-router.post('/:robotId/clear-stop', clearRobotStop);
+router.post(
+  "/:robotId/clear-stop",
+  clearRobotStop
+);
 
 export default router;
