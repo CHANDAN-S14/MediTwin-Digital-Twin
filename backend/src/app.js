@@ -12,104 +12,61 @@ import logger from './utils/logger.js';
 
 const app = express();
 
-/* ============================================================
-   PROXY
-============================================================ */
-
 app.set('trust proxy', 1);
 
-
-/* ============================================================
-   SECURITY
-============================================================ */
-
 app.use(helmet());
-
 
 /* ============================================================
    CORS
 ============================================================ */
 
-/*
- * IMPORTANT:
- *
- * Replace this with your REAL Netlify frontend URL.
- *
- * Example:
- * https://meditwin-digital-twin.netlify.app
- */
-
 const allowedOrigins = [
   'http://localhost:5173',
-  'http://127.0.0.1:5173',
   'http://localhost:3000',
-  'http://127.0.0.1:3000',
 
-  // Production Netlify frontend
-  'https://mediatwin.netlify.app/',
+  // Render frontend
+  'https://meditwin-digital-twin-2.onrender.com',
 ];
 
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Allow Postman/server-to-server requests
+      if (!origin) {
+        return callback(null, true);
+      }
 
-/*
- * CORS configuration
- */
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
 
-const corsOptions = {
-  origin: (origin, callback) => {
+      console.log('CORS blocked:', origin);
 
-    /*
-     * Requests such as Postman/server-to-server requests
-     * may not contain an Origin header.
-     */
-    if (!origin) {
-      return callback(null, true);
-    }
+      return callback(
+        new Error(`CORS blocked origin: ${origin}`)
+      );
+    },
 
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+    credentials: true,
 
-    logger.warn(`CORS blocked origin: ${origin}`);
+    methods: [
+      'GET',
+      'POST',
+      'PUT',
+      'PATCH',
+      'DELETE',
+      'OPTIONS',
+    ],
 
-    return callback(
-      new Error(`CORS blocked origin: ${origin}`)
-    );
-  },
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+    ],
+  })
+);
 
-  credentials: true,
-
-  methods: [
-    'GET',
-    'POST',
-    'PUT',
-    'PATCH',
-    'DELETE',
-    'OPTIONS',
-  ],
-
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'Accept',
-  ],
-
-  optionsSuccessStatus: 204,
-};
-
-
-/*
- * Apply CORS before the API routes.
- */
-
-app.use(cors(corsOptions));
-
-
-/*
- * Handle browser preflight requests.
- */
-
-app.options('*', cors(corsOptions));
-
+app.options('*', cors());
 
 /* ============================================================
    BODY PARSING
@@ -127,7 +84,6 @@ app.use(
   })
 );
 
-
 /* ============================================================
    LOGGING
 ============================================================ */
@@ -136,28 +92,23 @@ if (!env.isProd) {
   app.use(
     morgan('dev', {
       stream: {
-        write: (line) => {
-          logger.debug(line.trim());
-        },
+        write: (line) => logger.debug(line.trim()),
       },
     })
   );
 }
 
-
 /* ============================================================
-   RATE LIMITING
+   RATE LIMIT
 ============================================================ */
 
 app.use(
   '/api',
   rateLimit({
     windowMs: 60 * 1000,
-
     max: 300,
 
     standardHeaders: true,
-
     legacyHeaders: false,
 
     message: {
@@ -170,9 +121,8 @@ app.use(
   })
 );
 
-
 /* ============================================================
-   ROOT
+   HEALTH
 ============================================================ */
 
 app.get('/', (_req, res) => {
@@ -183,40 +133,19 @@ app.get('/', (_req, res) => {
   });
 });
 
-
-/* ============================================================
-   HEALTH
-============================================================ */
-
 app.get('/health', health);
 
-
 /* ============================================================
-   API ROUTES
+   API
 ============================================================ */
 
-app.use(
-  '/api/v1',
-  routes
-);
-
+app.use('/api/v1', routes);
 
 /* ============================================================
-   404
+   ERRORS
 ============================================================ */
 
 app.use(notFound);
-
-
-/* ============================================================
-   ERROR HANDLER
-============================================================ */
-
 app.use(errorHandler);
-
-
-/* ============================================================
-   EXPORT
-============================================================ */
 
 export default app;
