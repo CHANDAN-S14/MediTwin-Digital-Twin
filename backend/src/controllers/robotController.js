@@ -150,21 +150,21 @@ export const dispatchRobot = asyncHandler(async (req, res) => {
     ? expectedCategory
     : 'general';
 
-  const task = await startCollection({
-    hospitalId: robot.hospitalId ?? null,
+const task = await startCollection({
+  hospitalId: robot.hospitalId ?? null,
 
-    robotId: robot.robotId,
+  robotId,
 
-    department: department || 'OT',
+  department: department || 'OT',
 
-    expectedCategory: category,
+  expectedCategory: category,
 
-    confidence: Number(confidence) || 0,
+  confidence: Number(confidence) || 0,
 
-    wasteId,
+  wasteId,
 
-    requestedBy: req.user?._id ?? null,
-  });
+  requestedBy: null,
+});
 
   res.status(201).json({
     success: true,
