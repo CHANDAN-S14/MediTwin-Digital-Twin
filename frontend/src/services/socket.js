@@ -1,68 +1,28 @@
 import { io } from "socket.io-client";
 
-const SOCKET_URL =
-  import.meta.env.VITE_SOCKET_URL ||
-  "https://meditwin-digital-twin.onrender.com";
-
-const socket = io(SOCKET_URL, {
-  autoConnect: false,
-
-  transports: [import { io } from "socket.io-client";
+/* ============================================================
+   SOCKET SERVER URL
+============================================================ */
 
 const SOCKET_URL =
   import.meta.env.VITE_SOCKET_URL ||
   "https://meditwin-digital-twin.onrender.com";
 
+/* ============================================================
+   SOCKET INSTANCE
+============================================================ */
+
 const socket = io(SOCKET_URL, {
   autoConnect: false,
+
   transports: ["websocket", "polling"],
-  withCredentials: true,
-});
-
-export function connectDigitalTwin() {
-  if (!socket.connected) {
-    socket.connect();
-  }
-
-  socket.emit("digitalTwin:join");
-}
-
-export function disconnectDigitalTwin() {
-  if (socket.connected) {
-    socket.disconnect();
-  }
-}
-
-export default socket;
-    "websocket",
-    "polling",
-  ],
 
   withCredentials: true,
 });
 
-socket.on("connect", () => {
-  console.log(
-    "MediTwin Socket connected:",
-    socket.id
-  );
-
-  socket.emit("digitalTwin:join");
-});
-
-socket.on("connect_error", (error) => {
-  console.error(
-    "MediTwin Socket connection error:",
-    error.message
-  );
-});
-
-socket.on("disconnect", (reason) => {
-  console.log(
-    "MediTwin Socket disconnected:",
-    reason
-  );
-});
+/* ============================================================
+   CONNECT DIGITAL TWIN
+============================================================ */
 
 export function connectDigitalTwin() {
   if (!socket.connected) {
@@ -71,13 +31,25 @@ export function connectDigitalTwin() {
 
   if (socket.connected) {
     socket.emit("digitalTwin:join");
+  } else {
+    socket.once("connect", () => {
+      socket.emit("digitalTwin:join");
+    });
   }
 }
+
+/* ============================================================
+   DISCONNECT DIGITAL TWIN
+============================================================ */
 
 export function disconnectDigitalTwin() {
   if (socket.connected) {
     socket.disconnect();
   }
 }
+
+/* ============================================================
+   EXPORT SOCKET
+============================================================ */
 
 export default socket;
