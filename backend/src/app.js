@@ -25,12 +25,41 @@ app.use(helmet());
  * the built frontend is served. Only those origins are allowed, and credentials
  * are enabled because the socket handshake carries a token.
  */
+const cors = require('cors');
+
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://YOUR-NETLIFY-SITE.netlify.app',
+];
+
 app.use(
   cors({
-    origin: env.clientOrigin.split(',').map((o) => o.trim()),
+    origin: function (origin, callback) {
+      // Allow requests without an Origin header
+      // (Postman, server-to-server requests, etc.)
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(
+        new Error(`CORS blocked origin: ${origin}`)
+      );
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+    ],
   })
 );
+
+app.options('*', cors());
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
