@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import {
   OrbitControls,
-  
   Grid,
   Text,
   Float,
@@ -11,6 +10,8 @@ import {
 import socket, {
   connectDigitalTwin,
 } from '../services/socket.js';
+
+const ROBOT_ID = 'MEDI-001';
 
 const BIN_CONFIG = {
   yellow: {
@@ -153,7 +154,10 @@ function WasteObject({ visible, position }) {
   if (!visible) return null;
 
   return (
-    <Float speed={3} rotationIntensity={0.3}>
+    <Float
+      speed={3}
+      rotationIntensity={0.3}
+    >
       <mesh position={position}>
         <boxGeometry args={[0.6, 0.6, 0.6]} />
         <meshStandardMaterial color="#f97316" />
@@ -164,13 +168,21 @@ function WasteObject({ visible, position }) {
 
 function Robot({ position, status }) {
   const color =
-    ROBOT_COLORS[status] || ROBOT_COLORS.IDLE;
+    ROBOT_COLORS[status] ||
+    ROBOT_COLORS.IDLE;
 
   return (
-    <group position={[position.x, 0.6, position.z]}>
-      {/* body */}
+    <group
+      position={[
+        Number(position?.x) || 0,
+        0.6,
+        Number(position?.z) || 0,
+      ]}
+    >
+      {/* ROBOT BODY */}
       <mesh>
         <boxGeometry args={[1.2, 0.7, 1.4]} />
+
         <meshStandardMaterial
           color={color}
           metalness={0.4}
@@ -178,42 +190,57 @@ function Robot({ position, status }) {
         />
       </mesh>
 
-      {/* top */}
+      {/* TOP UNIT */}
       <mesh position={[0, 0.55, 0]}>
-        <cylinderGeometry args={[0.4, 0.4, 0.25, 24]} />
+        <cylinderGeometry
+          args={[0.4, 0.4, 0.25, 24]}
+        />
+
         <meshStandardMaterial color="#111827" />
       </mesh>
 
-      {/* wheels */}
+      {/* LEFT WHEEL */}
       <mesh
         rotation={[Math.PI / 2, 0, 0]}
         position={[-0.65, -0.3, 0]}
       >
-        <cylinderGeometry args={[0.25, 0.25, 0.25, 20]} />
+        <cylinderGeometry
+          args={[0.25, 0.25, 0.25, 20]}
+        />
+
         <meshStandardMaterial color="#111827" />
       </mesh>
 
+      {/* RIGHT WHEEL */}
       <mesh
         rotation={[Math.PI / 2, 0, 0]}
         position={[0.65, -0.3, 0]}
       >
-        <cylinderGeometry args={[0.25, 0.25, 0.25, 20]} />
+        <cylinderGeometry
+          args={[0.25, 0.25, 0.25, 20]}
+        />
+
         <meshStandardMaterial color="#111827" />
       </mesh>
 
+      {/* ROBOT ID */}
       <Text
         position={[0, 1.25, 0]}
         fontSize={0.35}
         color="#111827"
         anchorX="center"
       >
-        MEDI-001
+        {ROBOT_ID}
       </Text>
     </group>
   );
 }
 
-function Scene({ robot, wasteVisible, wastePosition }) {
+function Scene({
+  robot,
+  wasteVisible,
+  wastePosition,
+}) {
   return (
     <>
       <ambientLight intensity={1.5} />
@@ -223,11 +250,11 @@ function Scene({ robot, wasteVisible, wastePosition }) {
         intensity={2}
       />
 
-      
-
       <Floor />
 
       <ChargingStation />
+
+      {/* DEPARTMENTS */}
 
       <Department
         name="OT"
@@ -249,6 +276,8 @@ function Scene({ robot, wasteVisible, wastePosition }) {
         position={[0, 0.9, 7]}
       />
 
+      {/* WASTE BINS */}
+
       <Bin
         category="yellow"
         position={BIN_CONFIG.yellow.position}
@@ -269,10 +298,14 @@ function Scene({ robot, wasteVisible, wastePosition }) {
         position={BIN_CONFIG.general.position}
       />
 
+      {/* WASTE */}
+
       <WasteObject
         visible={wasteVisible}
         position={wastePosition}
       />
+
+      {/* ROBOT */}
 
       <Robot
         position={robot.position}
@@ -286,22 +319,30 @@ function Scene({ robot, wasteVisible, wastePosition }) {
 
 export default function DigitalTwin() {
   const [robot, setRobot] = useState({
-    robotId: 'MEDI-001',
+    robotId: ROBOT_ID,
+
     status: 'IDLE',
+
     position: {
       x: 0,
       y: 0,
       z: 0,
     },
+
     currentLocation: 'Charging Station',
+
     targetLocation: null,
+
     targetBin: null,
+
     lastActivity: 'Waiting for task',
   });
 
   const [waste, setWaste] = useState({
     visible: false,
+
     category: 'general',
+
     position: {
       x: 0,
       y: 0.5,
@@ -309,82 +350,201 @@ export default function DigitalTwin() {
     },
   });
 
+  /*
+   * ============================================================
+   * SOCKET CONNECTION
+   * ============================================================
+   */
+
   useEffect(() => {
     connectDigitalTwin();
 
+    /*
+     * ROBOT STATUS
+     */
     const handleStatus = (data) => {
-      if (data.robotId !== 'MEDI-001') return;
+      console.log(
+        '🤖 ROBOT STATUS:',
+        data
+      );
+
+      // IMPORTANT:
+      // Only MEDI-001 controls this Digital Twin.
+      if (
+        data?.robotId !== ROBOT_ID
+      ) {
+        return;
+      }
 
       setRobot((previous) => ({
         ...previous,
+
         ...data,
+
+        robotId: ROBOT_ID,
       }));
 
+      /*
+       * Robot reached waste pickup location.
+       */
       if (
-        data.status === 'ARRIVED_AT_PICKUP'
+        data.status ===
+        'ARRIVED_AT_PICKUP'
       ) {
         setWaste((previous) => ({
           ...previous,
+
           visible: true,
         }));
       }
 
-      if (data.status === 'COLLECTING') {
+      /*
+       * Robot collected the waste.
+       */
+      if (
+        data.status === 'COLLECTING'
+      ) {
         setWaste((previous) => ({
           ...previous,
+
           visible: false,
         }));
       }
     };
 
+    /*
+     * ROBOT POSITION
+     */
     const handlePosition = (data) => {
-      if (data.robotId !== 'MEDI-001') return;
+      console.log(
+        '📍 ROBOT POSITION:',
+        data
+      );
+
+      if (
+        data?.robotId !== ROBOT_ID
+      ) {
+        return;
+      }
+
+      if (!data?.position) {
+        return;
+      }
 
       setRobot((previous) => ({
         ...previous,
-        position: data.position,
+
+        position: {
+          x:
+            Number(
+              data.position.x
+            ) || 0,
+
+          y:
+            Number(
+              data.position.y
+            ) || 0,
+
+          z:
+            Number(
+              data.position.z
+            ) || 0,
+        },
       }));
     };
 
-    const handleWasteCollected = (data) => {
-      if (data.robotId !== MEDI-001') return;
+    /*
+     * WASTE COLLECTED
+     */
+    const handleWasteCollected = (
+      data
+    ) => {
+      console.log(
+        '♻️ WASTE COLLECTED:',
+        data
+      );
+
+      if (
+        data?.robotId !== ROBOT_ID
+      ) {
+        return;
+      }
 
       setWaste((previous) => ({
         ...previous,
+
         visible: false,
       }));
     };
 
-    const handleWasteDeposited = (data) => {
-      if (data.robotId !== 'MEDI-001') return;
+    /*
+     * WASTE DEPOSITED
+     */
+    const handleWasteDeposited = (
+      data
+    ) => {
+      console.log(
+        '🗑️ WASTE DEPOSITED:',
+        data
+      );
+
+      if (
+        data?.robotId !== ROBOT_ID
+      ) {
+        return;
+      }
 
       setWaste((previous) => ({
         ...previous,
+
         visible: false,
       }));
     };
 
-    socket.on('robot:status', handleStatus);
-    socket.on('robot:position', handlePosition);
+    /*
+     * REGISTER SOCKET EVENTS
+     */
+
+    socket.on(
+      'robot:status',
+      handleStatus
+    );
+
+    socket.on(
+      'robot:position',
+      handlePosition
+    );
+
     socket.on(
       'waste:collected',
       handleWasteCollected
     );
+
     socket.on(
       'waste:deposited',
       handleWasteDeposited
     );
 
+    /*
+     * CLEANUP
+     */
+
     return () => {
-      socket.off('robot:status', handleStatus);
+      socket.off(
+        'robot:status',
+        handleStatus
+      );
+
       socket.off(
         'robot:position',
         handlePosition
       );
+
       socket.off(
         'waste:collected',
         handleWasteCollected
       );
+
       socket.off(
         'waste:deposited',
         handleWasteDeposited
@@ -392,42 +552,109 @@ export default function DigitalTwin() {
     };
   }, []);
 
-  const wastePosition = useMemo(() => {
-    const department = robot.targetLocation;
+  /*
+   * ============================================================
+   * WASTE POSITION
+   * ============================================================
+   */
 
-    if (department === 'OT') {
+  const wastePosition = useMemo(() => {
+    const target =
+      robot.targetLocation;
+
+    /*
+     * Backend may return:
+     * "OT"
+     * "ICU"
+     * "WARD"
+     * "GENERAL"
+     */
+
+    if (
+      target === 'OT' ||
+      target === 'Moving to OT'
+    ) {
       return [-7, 0.6, 3];
     }
 
-    if (department === 'ICU') {
+    if (
+      target === 'ICU' ||
+      target === 'Moving to ICU'
+    ) {
       return [-6, 0.6, -4];
     }
 
-    if (department === 'WARD') {
+    if (
+      target === 'WARD' ||
+      target === 'Moving to WARD'
+    ) {
       return [7, 0.6, -3];
     }
 
     return [0, 0.6, 7];
-  }, [robot.targetLocation]);
+  }, [
+    robot.targetLocation,
+  ]);
+
+  /*
+   * ============================================================
+   * UI
+   * ============================================================
+   */
 
   return (
     <div className="w-full h-screen bg-slate-950 text-white">
-      <div className="absolute z-10 top-[100px] left-4 right-4 gap-[500px] flex justify-center pointer-events-none">
-        <div className="bg-white/95 text-slate-900 rounded-xl px-5 py-4 shadow-xl pointer-events-auto ml-[280px]">
+
+      {/* TOP INFORMATION */}
+
+      <div
+        className="
+          absolute
+          z-10
+          top-[100px]
+          left-4
+          right-4
+          gap-6
+          flex
+          justify-center
+          pointer-events-none
+        "
+      >
+
+        {/* ROBOT STATUS */}
+
+        <div
+          className="
+            bg-white/95
+            text-slate-900
+            rounded-xl
+            px-5
+            py-4
+            shadow-xl
+            pointer-events-auto
+          "
+        >
+
           <h1 className="text-xl font-bold">
             MediTwin Digital Twin
           </h1>
 
           <p className="text-sm mt-1">
-            Robot: <b>{robot.robotId}</b>
+            Robot:{' '}
+            <b>
+              {robot.robotId}
+            </b>
           </p>
 
           <p className="text-sm">
             Status:{' '}
+
             <b
               style={{
                 color:
-                  ROBOT_COLORS[robot.status] ||
+                  ROBOT_COLORS[
+                    robot.status
+                  ] ||
                   '#111827',
               }}
             >
@@ -436,43 +663,107 @@ export default function DigitalTwin() {
           </p>
 
           <p className="text-sm">
-            Activity: {robot.lastActivity}
+            Activity:{' '}
+            {robot.lastActivity ||
+              'Waiting for task'}
           </p>
+
+          {robot.targetLocation && (
+            <p className="text-sm">
+              Target:{' '}
+              <b>
+                {robot.targetLocation}
+              </b>
+            </p>
+          )}
 
           {robot.targetBin && (
             <p className="text-sm">
               Target bin:{' '}
-              <b>{robot.targetBin.toUpperCase()}</b>
+
+              <b>
+                {String(
+                  robot.targetBin
+                ).toUpperCase()}
+              </b>
             </p>
           )}
         </div>
 
-        <div className="bg-white/95 text-slate-900 rounded-xl px-5 py-4 shadow-xl pointer-events-auto ">
+        {/* ROBOT STATES */}
+
+        <div
+          className="
+            bg-white/95
+            text-slate-900
+            rounded-xl
+            px-5
+            py-4
+            shadow-xl
+            pointer-events-auto
+          "
+        >
           <p className="font-semibold mb-2">
             Robot states
           </p>
 
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <span>🟢 IDLE</span>
-            <span>🔵 MOVING</span>
-            <span>🟡 COLLECTING</span>
-            <span>🟣 TO BIN</span>
-            <span>🔴 DEPOSITING</span>
-            <span>🔷 RETURNING</span>
+          <div
+            className="
+              grid
+              grid-cols-2
+              gap-x-4
+              gap-y-1
+              text-xs
+            "
+          >
+            <span>
+              🟢 IDLE
+            </span>
+
+            <span>
+              🔵 MOVING
+            </span>
+
+            <span>
+              🟡 COLLECTING
+            </span>
+
+            <span>
+              🟣 TO BIN
+            </span>
+
+            <span>
+              🔴 DEPOSITING
+            </span>
+
+            <span>
+              🔷 RETURNING
+            </span>
           </div>
         </div>
       </div>
 
+      {/* THREE.JS */}
+
       <Canvas
         camera={{
-          position: [16, 14, 16],
+          position: [
+            16,
+            14,
+            16,
+          ],
+
           fov: 45,
         }}
       >
         <Scene
           robot={robot}
-          wasteVisible={waste.visible}
-          wastePosition={wastePosition}
+          wasteVisible={
+            waste.visible
+          }
+          wastePosition={
+            wastePosition
+          }
         />
       </Canvas>
     </div>
