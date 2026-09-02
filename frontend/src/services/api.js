@@ -10,7 +10,6 @@ const API_BASE =
   import.meta.env.VITE_API_URL ||
   "https://meditwin-digital-twin.onrender.com/api/v1";
 
-
 /* ============================================================
    AXIOS INSTANCE
 ============================================================ */
@@ -20,43 +19,6 @@ export const api = axios.create({
   timeout: 60000,
   withCredentials: true,
 });
-
-
-
-export const robots = {
-  list: () =>
-    get('/robots'),
-
-  one: (robotId) =>
-    get(`/robots/${robotId}`),
-
-  telemetry: (robotId) =>
-    get(`/robots/${robotId}/telemetry`),
-
-  dispatch: (robotId, body = {}) => {
-    if (robotId) {
-      return post(
-        `/robots/${robotId}/dispatch`,
-        body
-      );
-    }
-
-    return post(
-      '/robots/dispatch',
-      body
-    );
-  },
-
-  recall: (robotId) =>
-    post(`/robots/${robotId}/recall`),
-
-  stop: (robotId) =>
-    post(`/robots/${robotId}/stop`),
-
-  clearStop: (robotId) =>
-    post(`/robots/${robotId}/clear-stop`),
-};
-
 
 /* ============================================================
    TOKEN MANAGEMENT
@@ -70,7 +32,6 @@ export const getToken = () => {
   }
 };
 
-
 export const setToken = (token) => {
   try {
     if (token) {
@@ -83,7 +44,6 @@ export const setToken = (token) => {
   }
 };
 
-
 /* ============================================================
    UNAUTHORIZED HANDLER
 ============================================================ */
@@ -93,7 +53,6 @@ let onUnauthorized = null;
 export const setUnauthorizedHandler = (handler) => {
   onUnauthorized = handler;
 };
-
 
 /* ============================================================
    REQUEST INTERCEPTOR
@@ -106,9 +65,15 @@ api.interceptors.request.use(
     config.headers = config.headers || {};
 
     /*
-     * Add JWT token when available
+     * Some endpoints, especially robot demo endpoints,
+     * can be called without authentication.
+     *
+     * Use:
+     *   skipAuth: true
+     *
+     * in the axios config to prevent Authorization header.
      */
-    if (token) {
+    if (token && !config.skipAuth) {
       config.headers.Authorization = `Bearer ${token}`;
     }
 
@@ -123,21 +88,22 @@ api.interceptors.request.use(
     }
 
     /*
-     * IMPORTANT:
      * Do not manually set multipart/form-data.
-     * Browser/Axios will generate the boundary.
+     * Axios/browser will create the boundary.
      */
     if (config.data instanceof FormData) {
       delete config.headers["Content-Type"];
     }
 
+    /*
+     * Remove custom option before Axios sends the request.
+     */
+    delete config.skipAuth;
+
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
-
 
 /* ============================================================
    ERROR MESSAGE
@@ -148,7 +114,7 @@ const explain = (error) => {
   const data = response?.data;
 
   /*
-   * Backend:
+   * Backend format:
    *
    * {
    *   success: false,
@@ -171,7 +137,7 @@ const explain = (error) => {
   }
 
   /*
-   * Network error
+   * Network / CORS / backend unavailable
    */
   if (
     error?.code === "ERR_NETWORK" ||
@@ -179,7 +145,7 @@ const explain = (error) => {
   ) {
     return (
       "Cannot reach the MediTwin backend server. " +
-      "Check the Render backend URL and Netlify environment variables."
+      "Check the Render backend URL and CORS configuration."
     );
   }
 
@@ -235,15 +201,12 @@ const explain = (error) => {
   }
 };
 
-
 /* ============================================================
    RESPONSE INTERCEPTOR
 ============================================================ */
 
 api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
+  (response) => response,
 
   (error) => {
     const response = error?.response;
@@ -253,11 +216,15 @@ api.interceptors.response.use(
       config?.url?.includes("/auth/login");
 
     /*
-     * Handle expired/invalid authentication
+     * Handle expired/invalid authentication.
+     *
+     * Robot endpoints using skipAuth are intentionally
+     * allowed to work without login.
      */
     if (
       response?.status === 401 &&
-      !isLogin
+      !isLogin &&
+      !config?.skipAuth
     ) {
       if (onUnauthorized) {
         onUnauthorized();
@@ -280,7 +247,6 @@ api.interceptors.response.use(
   }
 );
 
-
 /* ============================================================
    RESPONSE HELPERS
 ============================================================ */
@@ -291,7 +257,6 @@ const unwrap = (response) => {
     response?.data
   );
 };
-
 
 const unwrapFull = (response) => {
   return {
@@ -305,34 +270,35 @@ const unwrapFull = (response) => {
   };
 };
 
-
 /* ============================================================
    HTTP HELPERS
 ============================================================ */
 
 const get = (
   url,
-  params
+  params,
+  config = {}
 ) => {
   return api
     .get(url, {
       params,
+      ...config,
     })
     .then(unwrap);
 };
 
-
 const getFull = (
   url,
-  params
+  params,
+  config = {}
 ) => {
   return api
     .get(url, {
       params,
+      ...config,
     })
     .then(unwrapFull);
 };
-
 
 const post = (
   url,
@@ -348,7 +314,6 @@ const post = (
     .then(unwrap);
 };
 
-
 const patch = (
   url,
   body,
@@ -363,7 +328,6 @@ const patch = (
     .then(unwrap);
 };
 
-
 const del = (
   url,
   config = {}
@@ -376,13 +340,11 @@ const del = (
     .then(unwrap);
 };
 
-
 /* ============================================================
    AUTH
 ============================================================ */
 
 export const auth = {
-
   login: (
     email,
     password
@@ -396,7 +358,6 @@ export const auth = {
     );
   },
 
-
   register: (
     payload
   ) => {
@@ -406,13 +367,11 @@ export const auth = {
     );
   },
 
-
   me: () => {
     return get(
       "/auth/me"
     );
   },
-
 
   updateProfile: (
     payload
@@ -422,7 +381,6 @@ export const auth = {
       payload
     );
   },
-
 
   changePassword: (
     currentPassword,
@@ -438,94 +396,145 @@ export const auth = {
   },
 };
 
-
 /* ============================================================
    ROBOTS
+   IMPORTANT:
+   Robot demo operations DO NOT REQUIRE LOGIN.
 ============================================================ */
 
 export const robots = {
-
+  /*
+   * GET /robots
+   *
+   * No login required.
+   */
   list: () => {
     return get(
-      "/robots"
+      "/robots",
+      undefined,
+      {
+        skipAuth: true,
+      }
     );
   },
 
-
+  /*
+   * GET /robots/:robotId
+   */
   one: (
     robotId
   ) => {
     return get(
-      `/robots/${robotId}`
+      `/robots/${robotId}`,
+      undefined,
+      {
+        skipAuth: true,
+      }
     );
   },
 
-
+  /*
+   * GET /robots/:robotId/telemetry
+   */
   telemetry: (
     robotId
   ) => {
     return get(
-      `/robots/${robotId}/telemetry`
+      `/robots/${robotId}/telemetry`,
+      undefined,
+      {
+        skipAuth: true,
+      }
     );
   },
 
+  /*
+   * POST /robots/:robotId/dispatch
+   *
+   * Example:
+   *
+   * robots.dispatch("ROBOT-001", {
+   *   department: "OT",
+   *   expectedCategory: "yellow",
+   *   confidence: 0.94,
+   *   wasteId: "MW-0001"
+   * })
+   */
+  dispatch: (
+    robotId,
+    body = {}
+  ) => {
+    if (!robotId) {
+      return Promise.reject(
+        new Error(
+          "Robot ID is required to dispatch a robot."
+        )
+      );
+    }
 
-dispatch: (
-  robotId,
-  body = {}
-) => {
-  if (robotId) {
     return post(
       `/robots/${robotId}/dispatch`,
-      body
+      body,
+      {
+        skipAuth: true,
+      }
     );
-  }
+  },
 
-  return post(
-    `/robots/dispatch`,
-    body
-  );
-},
-
-
+  /*
+   * POST /robots/:robotId/recall
+   */
   recall: (
     robotId
   ) => {
     return post(
-      `/robots/${robotId}/recall`
+      `/robots/${robotId}/recall`,
+      undefined,
+      {
+        skipAuth: true,
+      }
     );
   },
 
-
+  /*
+   * POST /robots/:robotId/stop
+   */
   stop: (
     robotId
   ) => {
     return post(
-      `/robots/${robotId}/stop`
+      `/robots/${robotId}/stop`,
+      undefined,
+      {
+        skipAuth: true,
+      }
     );
   },
 
-
+  /*
+   * POST /robots/:robotId/clear-stop
+   */
   clearStop: (
     robotId
   ) => {
     return post(
-      `/robots/${robotId}/clear-stop`
+      `/robots/${robotId}/clear-stop`,
+      undefined,
+      {
+        skipAuth: true,
+      }
     );
   },
 };
-
 
 /* ============================================================
    WASTE
 ============================================================ */
 
 export const waste = {
-
   list: (
     params = {}
   ) => {
-
     const cleanParams = {
       ...params,
     };
@@ -546,7 +555,6 @@ export const waste = {
     );
   },
 
-
   one: (
     id
   ) => {
@@ -554,7 +562,6 @@ export const waste = {
       `/waste/${id}`
     );
   },
-
 
   create: (
     body
@@ -564,7 +571,6 @@ export const waste = {
       body
     );
   },
-
 
   reclassify: (
     id,
@@ -580,7 +586,6 @@ export const waste = {
     );
   },
 
-
   remove: (
     id
   ) => {
@@ -589,11 +594,9 @@ export const waste = {
     );
   },
 
-
   exportCsv: (
     params = {}
   ) => {
-
     const cleanParams = {
       ...params,
     };
@@ -619,26 +622,22 @@ export const waste = {
   },
 };
 
-
 /* ============================================================
    AI
 ============================================================ */
 
 export const ai = {
-
   categories: () => {
     return get(
       "/ai/categories"
     );
   },
 
-
   health: () => {
     return get(
       "/ai/health"
     );
   },
-
 
   classify: ({
     file,
@@ -648,7 +647,6 @@ export const ai = {
     dispatch = false,
     robotId = null,
   }) => {
-
     if (!file) {
       throw new Error(
         'Attach an image in the "image" field'
@@ -708,13 +706,11 @@ export const ai = {
   },
 };
 
-
 /* ============================================================
    TASKS
 ============================================================ */
 
 export const tasks = {
-
   list: (
     params = {}
   ) => {
@@ -724,7 +720,6 @@ export const tasks = {
     );
   },
 
-
   one: (
     taskId
   ) => {
@@ -732,7 +727,6 @@ export const tasks = {
       `/tasks/${taskId}`
     );
   },
-
 
   create: (
     body
@@ -742,7 +736,6 @@ export const tasks = {
       body
     );
   },
-
 
   setStatus: (
     taskId,
@@ -759,13 +752,11 @@ export const tasks = {
   },
 };
 
-
 /* ============================================================
    COMPARTMENTS
 ============================================================ */
 
 export const compartments = {
-
   list: (
     params = {}
   ) => {
@@ -775,7 +766,6 @@ export const compartments = {
     );
   },
 
-
   one: (
     id
   ) => {
@@ -783,7 +773,6 @@ export const compartments = {
       `/compartments/${id}`
     );
   },
-
 
   scheduleDisposal: (
     id,
@@ -797,7 +786,6 @@ export const compartments = {
     );
   },
 
-
   empty: (
     id,
     body = {}
@@ -809,19 +797,16 @@ export const compartments = {
   },
 };
 
-
 /* ============================================================
    ANALYTICS
 ============================================================ */
 
 export const analytics = {
-
   overview: () => {
     return get(
       "/analytics/overview"
     );
   },
-
 
   byCategory: (
     params = {}
@@ -832,7 +817,6 @@ export const analytics = {
     );
   },
 
-
   byDepartment: (
     params = {}
   ) => {
@@ -841,7 +825,6 @@ export const analytics = {
       params
     );
   },
-
 
   daily: (
     params = {}
@@ -852,7 +835,6 @@ export const analytics = {
     );
   },
 
-
   aiPerformance: (
     params = {}
   ) => {
@@ -862,7 +844,6 @@ export const analytics = {
     );
   },
 
-
   fleet: () => {
     return get(
       "/analytics/fleet"
@@ -870,13 +851,11 @@ export const analytics = {
   },
 };
 
-
 /* ============================================================
    ALERTS
 ============================================================ */
 
 export const alerts = {
-
   list: (
     params = {}
   ) => {
@@ -886,7 +865,6 @@ export const alerts = {
     );
   },
 
-
   acknowledge: (
     id
   ) => {
@@ -895,7 +873,6 @@ export const alerts = {
     );
   },
 
-
   acknowledgeAll: () => {
     return post(
       "/alerts/acknowledge-all"
@@ -903,43 +880,36 @@ export const alerts = {
   },
 };
 
-
 /* ============================================================
    AUDIT
 ============================================================ */
 
 export const audit = {
-
   list: (
     params = {}
   ) => {
     return getFull(
-      "/audit",
-      params
+      "/audit"
     );
   },
 };
-
 
 /* ============================================================
    HOSPITAL
 ============================================================ */
 
 export const hospital = {
-
   get: () => {
     return get(
       "/hospital"
     );
   },
 
-
   layout: () => {
     return get(
       "/hospital/layout"
     );
   },
-
 
   previewRoute: (
     from,
@@ -954,7 +924,6 @@ export const hospital = {
     );
   },
 
-
   update: (
     body
   ) => {
@@ -965,20 +934,17 @@ export const hospital = {
   },
 };
 
-
 /* ============================================================
    SYSTEM
 ============================================================ */
 
 export const system = {
-
   status: () => {
     return get(
       "/system/status"
     );
   },
 };
-
 
 /* ============================================================
    DEFAULT EXPORT
