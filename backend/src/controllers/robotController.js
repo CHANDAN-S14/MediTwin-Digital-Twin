@@ -102,15 +102,19 @@ export const dispatchRobot = asyncHandler(async (req, res) => {
     wasteId = null,
   } = req.body || {};
 
+  /*
+   * If a robotId was supplied, use that robot.
+   *
+   * Otherwise automatically select the first
+   * IDLE robot with battery > 15%.
+   */
   let robot;
 
-  // If frontend specifies a robot, use it.
   if (requestedRobotId) {
     robot = await Robot.findOne({
       robotId: requestedRobotId,
     });
   } else {
-    // Otherwise automatically find an available robot.
     robot = await Robot.findOne({
       status: 'IDLE',
       battery: { $gt: 15 },
@@ -125,6 +129,9 @@ export const dispatchRobot = asyncHandler(async (req, res) => {
     );
   }
 
+  /*
+   * Double-check robot state.
+   */
   if (robot.status !== 'IDLE') {
     throw ApiError.conflict(
       `Robot ${robot.robotId} is currently ${robot.status}`
@@ -137,6 +144,9 @@ export const dispatchRobot = asyncHandler(async (req, res) => {
     );
   }
 
+  /*
+   * Validate waste category.
+   */
   const validCategories = [
     'yellow',
     'red',
@@ -150,21 +160,24 @@ export const dispatchRobot = asyncHandler(async (req, res) => {
     ? expectedCategory
     : 'general';
 
-const task = await startCollection({
-  hospitalId: robot.hospitalId ?? null,
+  /*
+   * Start simulation.
+   */
+  const task = await startCollection({
+    hospitalId: robot.hospitalId ?? null,
 
-  robotId,
+    robotId: robot.robotId,
 
-  department: department || 'OT',
+    department: department || 'OT',
 
-  expectedCategory: category,
+    expectedCategory: category,
 
-  confidence: Number(confidence) || 0,
+    confidence: Number(confidence) || 0,
 
-  wasteId,
+    wasteId,
 
-  requestedBy: null,
-});
+    requestedBy: null,
+  });
 
   res.status(201).json({
     success: true,
