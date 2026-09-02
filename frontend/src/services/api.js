@@ -1,26 +1,14 @@
-import axios from 'axios';
+import axios from "axios";
 
 /* ============================================================
    CONFIGURATION
 ============================================================ */
 
-const TOKEN_KEY = 'meditwin.token';
-
-/*
- * Netlify production:
- *
- * VITE_API_URL =
- * https://meditwin-digital-twin.onrender.com/api/v1
- *
- * Local development:
- *
- * VITE_API_URL =
- * http://localhost:5000/api/v1
- */
+const TOKEN_KEY = "meditwin.token";
 
 const API_BASE =
   import.meta.env.VITE_API_URL ||
-  'https://meditwin-digital-twin.onrender.com/api/v1';
+  "https://meditwin-digital-twin.onrender.com/api/v1";
 
 
 /* ============================================================
@@ -79,43 +67,36 @@ api.interceptors.request.use(
   (config) => {
     const token = getToken();
 
-    if (token) {
-      config.headers = config.headers || {};
+    config.headers = config.headers || {};
 
-      config.headers.Authorization =
-        `Bearer ${token}`;
+    /*
+     * Add JWT token when available
+     */
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
 
     /*
      * JSON requests
      */
-
     if (
       config.data &&
       !(config.data instanceof FormData)
     ) {
-      config.headers = config.headers || {};
-
-      config.headers['Content-Type'] =
-        'application/json';
+      config.headers["Content-Type"] = "application/json";
     }
 
     /*
      * IMPORTANT:
-     *
-     * Don't manually set multipart/form-data.
-     * The browser needs to create the boundary.
+     * Do not manually set multipart/form-data.
+     * Browser/Axios will generate the boundary.
      */
-
     if (config.data instanceof FormData) {
-      if (config.headers) {
-        delete config.headers['Content-Type'];
-      }
+      delete config.headers["Content-Type"];
     }
 
     return config;
   },
-
   (error) => {
     return Promise.reject(error);
   }
@@ -131,7 +112,7 @@ const explain = (error) => {
   const data = response?.data;
 
   /*
-   * Backend format:
+   * Backend:
    *
    * {
    *   success: false,
@@ -149,63 +130,69 @@ const explain = (error) => {
     return data.message;
   }
 
-  if (typeof data?.detail === 'string') {
+  if (typeof data?.detail === "string") {
     return data.detail;
   }
 
   /*
    * Network error
    */
-
   if (
-    error?.code === 'ERR_NETWORK' ||
+    error?.code === "ERR_NETWORK" ||
     !response
   ) {
     return (
-      'Cannot reach the MediTwin backend server. ' +
-      'Check the Render backend URL and Netlify environment variables.'
+      "Cannot reach the MediTwin backend server. " +
+      "Check the Render backend URL and Netlify environment variables."
     );
   }
 
   /*
    * Timeout
    */
-
-  if (error?.code === 'ECONNABORTED') {
-    return 'The server took too long to respond.';
+  if (
+    error?.code === "ECONNABORTED" ||
+    error?.code === "ETIMEDOUT"
+  ) {
+    return "The server took too long to respond.";
   }
 
   /*
    * HTTP errors
    */
-
   switch (response.status) {
     case 400:
-      return 'Invalid request. Please check the submitted information.';
+      return "Invalid request. Please check the submitted information.";
 
     case 401:
-      return 'You are not authenticated. Please login again.';
+      return "You are not authenticated. Please login again.";
 
     case 403:
-      return 'You do not have permission to perform this action.';
+      return "You do not have permission to perform this action.";
 
     case 404:
-      return 'The requested record was not found.';
+      return "The requested record was not found.";
 
     case 409:
-      return 'The request conflicts with the current state.';
+      return "The request conflicts with the current state.";
 
     case 413:
-      return 'The uploaded image is too large.';
+      return "The uploaded image is too large.";
+
+    case 422:
+      return "The submitted data is invalid.";
 
     case 429:
-      return 'Too many requests. Please wait and try again.';
+      return "Too many requests. Please wait and try again.";
 
     case 500:
-      return 'Internal server error.';
+      return "Internal server error.";
+
+    case 502:
+      return "The backend server is unavailable.";
 
     case 503:
-      return 'The requested service is currently unavailable.';
+      return "The requested service is currently unavailable.";
 
     default:
       return `Server error (${response.status}).`;
@@ -218,21 +205,27 @@ const explain = (error) => {
 ============================================================ */
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    return response;
+  },
 
   (error) => {
     const response = error?.response;
     const config = error?.config;
 
     const isLogin =
-      config?.url?.includes('/auth/login');
+      config?.url?.includes("/auth/login");
 
+    /*
+     * Handle expired/invalid authentication
+     */
     if (
       response?.status === 401 &&
-      !isLogin &&
-      onUnauthorized
+      !isLogin
     ) {
-      onUnauthorized();
+      if (onUnauthorized) {
+        onUnauthorized();
+      }
     }
 
     const friendlyError =
@@ -281,16 +274,26 @@ const unwrapFull = (response) => {
    HTTP HELPERS
 ============================================================ */
 
-const get = (url, params) => {
+const get = (
+  url,
+  params
+) => {
   return api
-    .get(url, { params })
+    .get(url, {
+      params,
+    })
     .then(unwrap);
 };
 
 
-const getFull = (url, params) => {
+const getFull = (
+  url,
+  params
+) => {
   return api
-    .get(url, { params })
+    .get(url, {
+      params,
+    })
     .then(unwrapFull);
 };
 
@@ -301,7 +304,11 @@ const post = (
   config = {}
 ) => {
   return api
-    .post(url, body, config)
+    .post(
+      url,
+      body,
+      config
+    )
     .then(unwrap);
 };
 
@@ -312,7 +319,11 @@ const patch = (
   config = {}
 ) => {
   return api
-    .patch(url, body, config)
+    .patch(
+      url,
+      body,
+      config
+    )
     .then(unwrap);
 };
 
@@ -322,7 +333,10 @@ const del = (
   config = {}
 ) => {
   return api
-    .delete(url, config)
+    .delete(
+      url,
+      config
+    )
     .then(unwrap);
 };
 
@@ -333,76 +347,59 @@ const del = (
 
 export const auth = {
 
-api.interceptors.request.use(
-  (config) => {
-    const token = getToken();
-
-    console.log(
-      'API REQUEST:',
-      config.method?.toUpperCase(),
-      config.baseURL + config.url
-    );
-
-    console.log(
-      'TOKEN EXISTS:',
-      !!token
-    );
-
-    if (token) {
-      config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-
-    if (
-      config.data &&
-      !(config.data instanceof FormData)
-    ) {
-      config.headers = config.headers || {};
-      config.headers['Content-Type'] =
-        'application/json';
-    }
-
-    if (config.data instanceof FormData) {
-      if (config.headers) {
-        delete config.headers['Content-Type'];
+  login: (
+    email,
+    password
+  ) => {
+    return post(
+      "/auth/login",
+      {
+        email,
+        password,
       }
-    }
-
-    return config;
+    );
   },
-  (error) => Promise.reject(error)
-);
+
 
   register: (
     payload
-  ) =>
-    post(
-      '/auth/register',
+  ) => {
+    return post(
+      "/auth/register",
       payload
-    ),
+    );
+  },
 
-  me: () =>
-    get('/auth/me'),
+
+  me: () => {
+    return get(
+      "/auth/me"
+    );
+  },
+
 
   updateProfile: (
     payload
-  ) =>
-    patch(
-      '/auth/me',
+  ) => {
+    return patch(
+      "/auth/me",
       payload
-    ),
+    );
+  },
+
 
   changePassword: (
     currentPassword,
     newPassword
-  ) =>
-    post(
-      '/auth/change-password',
+  ) => {
+    return post(
+      "/auth/change-password",
       {
         currentPassword,
         newPassword,
       }
-    ),
+    );
+  },
 };
 
 
@@ -412,52 +409,67 @@ api.interceptors.request.use(
 
 export const robots = {
 
-  list: () =>
-    get('/robots'),
+  list: () => {
+    return get(
+      "/robots"
+    );
+  },
+
 
   one: (
     robotId
-  ) =>
-    get(
+  ) => {
+    return get(
       `/robots/${robotId}`
-    ),
+    );
+  },
+
 
   telemetry: (
     robotId
-  ) =>
-    get(
+  ) => {
+    return get(
       `/robots/${robotId}/telemetry`
-    ),
+    );
+  },
+
 
   dispatch: (
     robotId,
     body = {}
-  ) =>
-    post(
+  ) => {
+    return post(
       `/robots/${robotId}/dispatch`,
       body
-    ),
+    );
+  },
+
 
   recall: (
     robotId
-  ) =>
-    post(
+  ) => {
+    return post(
       `/robots/${robotId}/recall`
-    ),
+    );
+  },
+
 
   stop: (
     robotId
-  ) =>
-    post(
+  ) => {
+    return post(
       `/robots/${robotId}/stop`
-    ),
+    );
+  },
+
 
   clearStop: (
     robotId
-  ) =>
-    post(
+  ) => {
+    return post(
       `/robots/${robotId}/clear-stop`
-    ),
+    );
+  },
 };
 
 
@@ -476,18 +488,17 @@ export const waste = {
     };
 
     /*
-     * Don't send fake hospital ID.
+     * Don't send fake hospital ID
      */
-
     if (
       cleanParams.hospitalId ===
-      'DEFAULT_HOSPITAL'
+      "DEFAULT_HOSPITAL"
     ) {
       delete cleanParams.hospitalId;
     }
 
     return getFull(
-      '/waste',
+      "/waste",
       cleanParams
     );
   },
@@ -495,41 +506,45 @@ export const waste = {
 
   one: (
     id
-  ) =>
-    get(
+  ) => {
+    return get(
       `/waste/${id}`
-    ),
+    );
+  },
 
 
   create: (
     body
-  ) =>
-    post(
-      '/waste',
+  ) => {
+    return post(
+      "/waste",
       body
-    ),
+    );
+  },
 
 
   reclassify: (
     id,
     category,
     reason
-  ) =>
-    patch(
+  ) => {
+    return patch(
       `/waste/${id}/category`,
       {
         category,
         reason,
       }
-    ),
+    );
+  },
 
 
   remove: (
     id
-  ) =>
-    del(
+  ) => {
+    return del(
       `/waste/${id}`
-    ),
+    );
+  },
 
 
   exportCsv: (
@@ -542,22 +557,21 @@ export const waste = {
 
     if (
       cleanParams.hospitalId ===
-      'DEFAULT_HOSPITAL'
+      "DEFAULT_HOSPITAL"
     ) {
       delete cleanParams.hospitalId;
     }
 
     return api
       .get(
-        '/waste/export',
+        "/waste/export",
         {
           params: cleanParams,
-          responseType: 'blob',
+          responseType: "blob",
         }
       )
       .then(
-        (response) =>
-          response.data
+        (response) => response.data
       );
   },
 };
@@ -569,16 +583,18 @@ export const waste = {
 
 export const ai = {
 
-  categories: () =>
-    get(
-      '/ai/categories'
-    ),
+  categories: () => {
+    return get(
+      "/ai/categories"
+    );
+  },
 
 
-  health: () =>
-    get(
-      '/ai/health'
-    ),
+  health: () => {
+    return get(
+      "/ai/health"
+    );
+  },
 
 
   classify: ({
@@ -600,13 +616,13 @@ export const ai = {
       new FormData();
 
     form.append(
-      'image',
+      "image",
       file
     );
 
     if (department) {
       form.append(
-        'department',
+        "department",
         department
       );
     }
@@ -614,33 +630,33 @@ export const ai = {
     if (
       weight !== undefined &&
       weight !== null &&
-      weight !== ''
+      weight !== ""
     ) {
       form.append(
-        'weight',
+        "weight",
         String(weight)
       );
     }
 
     form.append(
-      'persist',
+      "persist",
       String(persist)
     );
 
     form.append(
-      'dispatch',
+      "dispatch",
       String(dispatch)
     );
 
     if (robotId) {
       form.append(
-        'robotId',
+        "robotId",
         robotId
       );
     }
 
     return post(
-      '/ai/classify',
+      "/ai/classify",
       form,
       {
         timeout: 60000,
@@ -658,39 +674,46 @@ export const tasks = {
 
   list: (
     params = {}
-  ) =>
-    getFull(
-      '/tasks',
+  ) => {
+    return getFull(
+      "/tasks",
       params
-    ),
+    );
+  },
+
 
   one: (
     taskId
-  ) =>
-    get(
+  ) => {
+    return get(
       `/tasks/${taskId}`
-    ),
+    );
+  },
+
 
   create: (
     body
-  ) =>
-    post(
-      '/tasks',
+  ) => {
+    return post(
+      "/tasks",
       body
-    ),
+    );
+  },
+
 
   setStatus: (
     taskId,
     status,
-    reason = ''
-  ) =>
-    patch(
+    reason = ""
+  ) => {
+    return patch(
       `/tasks/${taskId}/status`,
       {
         status,
         reason,
       }
-    ),
+    );
+  },
 };
 
 
@@ -702,38 +725,45 @@ export const compartments = {
 
   list: (
     params = {}
-  ) =>
-    get(
-      '/compartments',
+  ) => {
+    return get(
+      "/compartments",
       params
-    ),
+    );
+  },
+
 
   one: (
     id
-  ) =>
-    get(
+  ) => {
+    return get(
       `/compartments/${id}`
-    ),
+    );
+  },
+
 
   scheduleDisposal: (
     id,
-    note = ''
-  ) =>
-    post(
+    note = ""
+  ) => {
+    return post(
       `/compartments/${id}/schedule-disposal`,
       {
         note,
       }
-    ),
+    );
+  },
+
 
   empty: (
     id,
     body = {}
-  ) =>
-    post(
+  ) => {
+    return post(
       `/compartments/${id}/empty`,
       body
-    ),
+    );
+  },
 };
 
 
@@ -743,47 +773,58 @@ export const compartments = {
 
 export const analytics = {
 
-  overview: () =>
-    get(
-      '/analytics/overview'
-    ),
+  overview: () => {
+    return get(
+      "/analytics/overview"
+    );
+  },
+
 
   byCategory: (
     params = {}
-  ) =>
-    get(
-      '/analytics/waste-by-category',
+  ) => {
+    return get(
+      "/analytics/waste-by-category",
       params
-    ),
+    );
+  },
+
 
   byDepartment: (
     params = {}
-  ) =>
-    get(
-      '/analytics/waste-by-department',
+  ) => {
+    return get(
+      "/analytics/waste-by-department",
       params
-    ),
+    );
+  },
+
 
   daily: (
     params = {}
-  ) =>
-    get(
-      '/analytics/daily',
+  ) => {
+    return get(
+      "/analytics/daily",
       params
-    ),
+    );
+  },
+
 
   aiPerformance: (
     params = {}
-  ) =>
-    get(
-      '/analytics/ai-performance',
+  ) => {
+    return get(
+      "/analytics/ai-performance",
       params
-    ),
+    );
+  },
 
-  fleet: () =>
-    get(
-      '/analytics/fleet'
-    ),
+
+  fleet: () => {
+    return get(
+      "/analytics/fleet"
+    );
+  },
 };
 
 
@@ -795,23 +836,28 @@ export const alerts = {
 
   list: (
     params = {}
-  ) =>
-    getFull(
-      '/alerts',
+  ) => {
+    return getFull(
+      "/alerts",
       params
-    ),
+    );
+  },
+
 
   acknowledge: (
     id
-  ) =>
-    post(
+  ) => {
+    return post(
       `/alerts/${id}/acknowledge`
-    ),
+    );
+  },
 
-  acknowledgeAll: () =>
-    post(
-      '/alerts/acknowledge-all'
-    ),
+
+  acknowledgeAll: () => {
+    return post(
+      "/alerts/acknowledge-all"
+    );
+  },
 };
 
 
@@ -823,11 +869,12 @@ export const audit = {
 
   list: (
     params = {}
-  ) =>
-    getFull(
-      '/audit',
+  ) => {
+    return getFull(
+      "/audit",
       params
-    ),
+    );
+  },
 };
 
 
@@ -837,35 +884,42 @@ export const audit = {
 
 export const hospital = {
 
-  get: () =>
-    get(
-      '/hospital'
-    ),
+  get: () => {
+    return get(
+      "/hospital"
+    );
+  },
 
-  layout: () =>
-    get(
-      '/hospital/layout'
-    ),
+
+  layout: () => {
+    return get(
+      "/hospital/layout"
+    );
+  },
+
 
   previewRoute: (
     from,
     to
-  ) =>
-    post(
-      '/hospital/route',
+  ) => {
+    return post(
+      "/hospital/route",
       {
         from,
         to,
       }
-    ),
+    );
+  },
+
 
   update: (
     body
-  ) =>
-    patch(
-      '/hospital',
+  ) => {
+    return patch(
+      "/hospital",
       body
-    ),
+    );
+  },
 };
 
 
@@ -875,10 +929,11 @@ export const hospital = {
 
 export const system = {
 
-  status: () =>
-    get(
-      '/system/status'
-    ),
+  status: () => {
+    return get(
+      "/system/status"
+    );
+  },
 };
 
 
@@ -887,7 +942,6 @@ export const system = {
 ============================================================ */
 
 export default {
-
   api,
 
   auth,
