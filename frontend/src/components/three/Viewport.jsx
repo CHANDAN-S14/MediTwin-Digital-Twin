@@ -2,7 +2,11 @@ import React from 'react';
 import { Canvas } from '@react-three/fiber';
 import {
   OrbitControls,
+<<<<<<< HEAD
  
+=======
+  
+>>>>>>> 7eaa01b (Update waste classification model)
   Grid,
   PerspectiveCamera,
 } from '@react-three/drei';
@@ -59,7 +63,11 @@ function Viewport() {
         <RobotModel />
 
         {/* Environment */}
+<<<<<<< HEAD
         
+=======
+       
+>>>>>>> 7eaa01b (Update waste classification model)
 
         {/* Camera controls */}
         <OrbitControls

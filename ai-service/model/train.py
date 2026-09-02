@@ -110,8 +110,8 @@ def build_dataset(data_dir: Path):
     def target_transform(index: int) -> int:
         return remap[index]
 
-    train_ds = ImageFolder(str(data_dir), transform=train_transform(), target_transform=target_transform)
-    eval_ds = ImageFolder(str(data_dir), transform=eval_transform(), target_transform=target_transform)
+    train_ds = ImageFolder(str(data_dir), transform=train_transform, target_transform=target_transform)
+    eval_ds = ImageFolder(str(data_dir), transform=eval_transform, target_transform=target_transform)
     return train_ds, eval_ds
 
 
@@ -276,11 +276,11 @@ def main() -> None:
 
     train_loader = DataLoader(
         Subset(train_ds, train_idx), batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=(device.type == "cuda"),
+        num_workers=0, pin_memory=(device.type == "cuda"),
     )
     val_loader = DataLoader(
         Subset(eval_ds, val_idx), batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=(device.type == "cuda"),
+        num_workers=0, pin_memory=(device.type == "cuda"),
     )
 
     model = build_model(args.architecture, len(CLASSES), pretrained=True).to(device)
