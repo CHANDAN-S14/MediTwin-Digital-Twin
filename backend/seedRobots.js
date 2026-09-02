@@ -1,82 +1,98 @@
-import mongoose from "mongoose";
-import Robot from "./models/Robot.js";
-import env from "./config/env.js";
+import mongoose from 'mongoose';
+import Robot from './src/models/Robot.js';
+import dotenv from 'dotenv';
 
-const robots = [
-  {
-    robotId: "ROBOT-001",
-    name: "MediTwin Robot 01",
-    status: "IDLE",
-    battery: 95,
-    load: 0,
-    currentLocation: "Charging Station",
-    targetLocation: null,
-    targetBin: null,
-    currentTaskId: null,
-    lastActivity: "Waiting for task",
-    position: {
-      x: 0,
-      y: 0,
-      z: 0,
-    },
-  },
-  {
-    robotId: "ROBOT-002",
-    name: "MediTwin Robot 02",
-    status: "IDLE",
-    battery: 85,
-    load: 0,
-    currentLocation: "Charging Station",
-    targetLocation: null,
-    targetBin: null,
-    currentTaskId: null,
-    lastActivity: "Waiting for task",
-    position: {
-      x: 0,
-      y: 0,
-      z: 0,
-    },
-  },
-  {
-    robotId: "ROBOT-003",
-    name: "MediTwin Robot 03",
-    status: "IDLE",
-    battery: 72,
-    load: 0,
-    currentLocation: "Charging Station",
-    targetLocation: null,
-    targetBin: null,
-    currentTaskId: null,
-    lastActivity: "Waiting for task",
-    position: {
-      x: 0,
-      y: 0,
-      z: 0,
-    },
-  },
-];
+dotenv.config();
 
 const seedRobots = async () => {
   try {
-    await mongoose.connect(env.mongoUri);
+    await mongoose.connect(process.env.MONGO_URI);
 
-    console.log("MongoDB connected");
+    console.log('MongoDB connected');
 
-    await Robot.deleteMany({});
+    const robots = [
+      {
+        robotId: 'MEDI-001',
+        name: 'MediTwin Robot 01',
+        status: 'IDLE',
+        battery: 100,
+        load: 0,
+        currentLocation: 'Charging Station',
+        targetLocation: null,
+        targetBin: null,
+        currentTaskId: null,
+        lastActivity: 'Waiting for task',
+        position: {
+          x: 0,
+          y: 0,
+          z: 0,
+        },
+      },
+      {
+        robotId: 'MEDI-002',
+        name: 'MediTwin Robot 02',
+        status: 'IDLE',
+        battery: 90,
+        load: 0,
+        currentLocation: 'Charging Station',
+        targetLocation: null,
+        targetBin: null,
+        currentTaskId: null,
+        lastActivity: 'Waiting for task',
+        position: {
+          x: 0,
+          y: 0,
+          z: 0,
+        },
+      },
+      {
+        robotId: 'MEDI-003',
+        name: 'MediTwin Robot 03',
+        status: 'IDLE',
+        battery: 80,
+        load: 0,
+        currentLocation: 'Charging Station',
+        targetLocation: null,
+        targetBin: null,
+        currentTaskId: null,
+        lastActivity: 'Waiting for task',
+        position: {
+          x: 0,
+          y: 0,
+          z: 0,
+        },
+      },
+    ];
 
-    await Robot.insertMany(robots);
+    for (const robot of robots) {
+      await Robot.findOneAndUpdate(
+        { robotId: robot.robotId },
+        robot,
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
+        }
+      );
+    }
 
-    console.log("Robots created successfully");
+    console.log('Robots seeded successfully');
 
-    const saved = await Robot.find({}).lean();
+    const allRobots = await Robot.find({}).lean();
 
-    console.log(saved);
+    console.log(
+      allRobots.map((robot) => ({
+        robotId: robot.robotId,
+        status: robot.status,
+        battery: robot.battery,
+      }))
+    );
 
     await mongoose.disconnect();
 
-    process.exit(0);
+    console.log('MongoDB disconnected');
   } catch (error) {
-    console.error("Robot seed failed:", error);
+    console.error('Seed error:', error);
 
     await mongoose.disconnect();
 
