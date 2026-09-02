@@ -94,59 +94,48 @@ res.json({
  * Hospital is NOT required.
  */
 export const dispatchRobot = asyncHandler(async (req, res) => {
+  // Get robot ID from URL
+  const { robotId } = req.params;
+
   const {
-    robotId: requestedRobotId,
     department = 'OT',
     expectedCategory = 'general',
     confidence = 1,
     wasteId = null,
   } = req.body || {};
 
-  /*
-   * If a robotId was supplied, use that robot.
-   *
-   * Otherwise automatically select the first
-   * IDLE robot with battery > 15%.
-   */
-  let robot;
+  console.log('🚀 Dispatch request:', {
+    robotId,
+    department,
+    expectedCategory,
+  });
 
-  if (requestedRobotId) {
-    robot = await Robot.findOne({
-      robotId: requestedRobotId,
-    });
-  } else {
-    robot = await Robot.findOne({
-      status: 'IDLE',
-      battery: { $gt: 15 },
-    }).sort({
-      battery: -1,
-    });
-  }
+  // Find the requested robot
+  const robot = await Robot.findOne({
+    robotId,
+  });
 
   if (!robot) {
-    throw ApiError.conflict(
-      'No available robot was found. Make sure at least one robot is IDLE and has enough battery.'
+    throw ApiError.notFound(
+      `Robot ${robotId} not found`
     );
   }
 
-  /*
-   * Double-check robot state.
-   */
+  // Check robot status
   if (robot.status !== 'IDLE') {
     throw ApiError.conflict(
       `Robot ${robot.robotId} is currently ${robot.status}`
     );
   }
 
+  // Check battery
   if (Number(robot.battery ?? 0) <= 15) {
     throw ApiError.conflict(
       `Robot ${robot.robotId} does not have enough battery`
     );
   }
 
-  /*
-   * Validate waste category.
-   */
+  // Validate waste category
   const validCategories = [
     'yellow',
     'red',
@@ -160,9 +149,7 @@ export const dispatchRobot = asyncHandler(async (req, res) => {
     ? expectedCategory
     : 'general';
 
-  /*
-   * Start simulation.
-   */
+  // Start robot movement simulation
   const task = await startCollection({
     hospitalId: robot.hospitalId ?? null,
 
@@ -179,25 +166,28 @@ export const dispatchRobot = asyncHandler(async (req, res) => {
     requestedBy: null,
   });
 
+  // Tell frontend about the robot status
+  emitRobotStatus(robot.robotId, {
+    status: 'COLLECTING',
+    currentLocation: robot.currentLocation,
+    targetLocation: `Moving to ${department || 'OT'}`,
+    targetBin: category,
+  });
+
   res.status(201).json({
     success: true,
 
-    message: 'Robot collection started',
+    message: `Robot ${robot.robotId} collection started`,
 
     data: {
       task,
-
       robotId: robot.robotId,
-
       department: department || 'OT',
-
       expectedCategory: category,
-
       wasteId,
     },
   });
 });
-
 /**
  * POST /api/v1/robots/:robotId/recall
  */
