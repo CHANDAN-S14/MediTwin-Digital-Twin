@@ -10,7 +10,6 @@ const robotSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Optional — robot can work in demo/global mode without a hospital.
     hospitalId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Hospital',
@@ -72,9 +71,10 @@ const robotSchema = new mongoose.Schema(
       default: null,
     },
 
+    // IMPORTANT:
+    // Simulator uses TASK-xxxx IDs, so this must be String.
     currentTaskId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Task',
+      type: String,
       default: null,
     },
 
