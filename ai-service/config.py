@@ -4,27 +4,49 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+# ---------------------------------------------------------
+# Base directory
+# ---------------------------------------------------------
+
 BASE_DIR = Path(__file__).resolve().parent
 
 load_dotenv(BASE_DIR / ".env")
 
 
-AI_HOST = os.getenv("AI_HOST", "127.0.0.1")
+# ---------------------------------------------------------
+# Server
+# ---------------------------------------------------------
+
+AI_HOST = os.getenv(
+    "AI_HOST",
+    "0.0.0.0"
+)
 
 AI_PORT = int(
-    os.getenv("AI_PORT", "8000")
+    os.getenv(
+        "PORT",
+        os.getenv("AI_PORT", "8000")
+    )
 )
 
 
+# ---------------------------------------------------------
+# Model
+# ---------------------------------------------------------
+
+# Your trained model is located at:
+#
+# ai-service/model/waste_classifier.pt
+#
 MODEL_PATH = BASE_DIR / os.getenv(
     "MODEL_PATH",
-    "models/waste_classifier.pth"
+    "model/waste_classifier.pt"
 )
 
 
 MODEL_VERSION = os.getenv(
     "MODEL_VERSION",
-    "waste-mobilenet-v1"
+    "mobilenet_v3_small"
 )
 
 
@@ -36,6 +58,10 @@ CONFIDENCE_THRESHOLD = float(
 )
 
 
+# ---------------------------------------------------------
+# Image
+# ---------------------------------------------------------
+
 IMAGE_SIZE = int(
     os.getenv(
         "IMAGE_SIZE",
@@ -43,6 +69,10 @@ IMAGE_SIZE = int(
     )
 )
 
+
+# ---------------------------------------------------------
+# Classes
+# ---------------------------------------------------------
 
 CLASSES = [
     "yellow",
