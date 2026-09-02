@@ -3,78 +3,9 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
-from torchvision.models import (
-    mobilenet_v3_small,
-    MobileNet_V3_Small_Weights
-)
+from torchvision.models import mobilenet_v3_small
 
-def resolve_device(requested="auto"):
-    requested = str(requested).lower().strip()
-
-    if requested == "cpu":
-        return torch.device("cpu")
-
-    if requested == "cuda":
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        print("CUDA requested but unavailable. Using CPU.")
-        return torch.device("cpu")
-
-    # auto
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-
-    return torch.device("cpu")
-
-
-def build_model(
-    architecture="mobilenet_v3_small",
-    num_classes=None,
-    pretrained=True,
-):
-    if architecture != "mobilenet_v3_small":
-        raise ValueError(
-            f"Unsupported architecture: {architecture}"
-        )
-
-    num_classes = num_classes or len(CLASSES)
-
-    weights = (
-        MobileNet_V3_Small_Weights.DEFAULT
-        if pretrained
-        else None
-    )
-
-    model = mobilenet_v3_small(
-        weights=weights
-    )
-
-    input_features = (
-        model.classifier[-1].in_features
-    )
-
-    model.classifier[-1] = torch.nn.Linear(
-        input_features,
-        num_classes
-    )
-
-    return model
-
-
-def head_parameters(
-    model,
-    architecture="mobilenet_v3_small",
-):
-    if architecture != "mobilenet_v3_small":
-        raise ValueError(
-            f"Unsupported architecture: {architecture}"
-        )
-
-    return model.classifier[-1].parameters()
-
-from app.preprocessing.preprocess import (
-    preprocess_image
-)
+from app.preprocessing.preprocess import preprocess_image
 
 from config import (
     CLASSES,
@@ -84,12 +15,40 @@ from config import (
 )
 
 
+# ============================================================
+# DEVICE
+# ============================================================
+
 DEVICE = torch.device(
-    "cuda"
-    if torch.cuda.is_available()
-    else "cpu"
+    "cuda" if torch.cuda.is_available() else "cpu"
 )
 
+
+# ============================================================
+# MODEL CREATION
+# ============================================================
+
+def build_model():
+
+    model = mobilenet_v3_small(
+        weights=None
+    )
+
+    input_features = (
+        model.classifier[-1].in_features
+    )
+
+    model.classifier[-1] = torch.nn.Linear(
+        input_features,
+        len(CLASSES)
+    )
+
+    return model
+
+
+# ============================================================
+# CLASSIFIER
+# ============================================================
 
 class WasteClassifier:
 
@@ -110,78 +69,183 @@ class WasteClassifier:
         self._load_model()
 
 
-    def _create_model(self):
-
-        model = mobilenet_v3_small(
-            weights=None
-        )
-
-        input_features = (
-            model.classifier[-1].in_features
-        )
-
-        model.classifier[-1] = torch.nn.Linear(
-            input_features,
-            len(CLASSES)
-        )
-
-        return model
-
+    # ========================================================
+    # LOAD MODEL
+    # ========================================================
 
     def _load_model(self):
 
         try:
 
-            self.model = self._create_model()
+            print("====================================")
+            print("Loading MediTwin AI model")
+            print("====================================")
+
+            print(
+                f"Model path: {MODEL_PATH}"
+            )
+
+            print(
+                f"Model exists: {Path(MODEL_PATH).exists()}"
+            )
+
+            print(
+                f"Device: {self.device}"
+            )
+
+
+            # -----------------------------------------------
+            # Check model file
+            # -----------------------------------------------
 
             if not Path(MODEL_PATH).exists():
 
-                self.model_loaded = True
+                raise FileNotFoundError(
+                    f"Model file not found: {MODEL_PATH}"
+                )
 
-                self.model_trained = False
 
-                self.load_error = None
+            # -----------------------------------------------
+            # Create model architecture
+            # -----------------------------------------------
 
-                self.model.to(self.device)
+            self.model = build_model()
 
-                self.model.eval()
 
-                return
-
+            # -----------------------------------------------
+            # Load checkpoint
+            # -----------------------------------------------
 
             checkpoint = torch.load(
                 MODEL_PATH,
                 map_location=self.device
             )
 
-            if isinstance(
-                checkpoint,
-                dict
-            ) and "model_state_dict" in checkpoint:
 
-                self.model.load_state_dict(
-                    checkpoint["model_state_dict"]
-                )
+            print(
+                f"Checkpoint type: {type(checkpoint)}"
+            )
 
-                self.model_version = checkpoint.get(
-                    "model_version",
-                    MODEL_VERSION
-                )
+
+            # =================================================
+            # IMPORTANT
+            # Your training script saved:
+            #
+            # {
+            #     "state_dict": ...,
+            #     "classes": ...,
+            #     "architecture": ...,
+            #     "model_version": ...,
+            #     ...
+            # }
+            #
+            # Therefore we must extract checkpoint["state_dict"]
+            # =================================================
+
+            if isinstance(checkpoint, dict):
+
+                if "state_dict" in checkpoint:
+
+                    state_dict = checkpoint["state_dict"]
+
+                    print(
+                        "Found checkpoint['state_dict']"
+                    )
+
+                    self.model_version = checkpoint.get(
+                        "model_version",
+                        MODEL_VERSION
+                    )
+
+                elif "model_state_dict" in checkpoint:
+
+                    # Support older checkpoint format
+
+                    state_dict = checkpoint[
+                        "model_state_dict"
+                    ]
+
+                    print(
+                        "Found checkpoint['model_state_dict']"
+                    )
+
+                    self.model_version = checkpoint.get(
+                        "model_version",
+                        MODEL_VERSION
+                    )
+
+                else:
+
+                    # Assume checkpoint itself is state_dict
+
+                    state_dict = checkpoint
 
             else:
 
-                self.model.load_state_dict(
-                    checkpoint
+                raise RuntimeError(
+                    "Invalid model checkpoint format"
                 )
 
 
-            self.model.to(self.device)
+            # -----------------------------------------------
+            # Validate classes if checkpoint contains them
+            # -----------------------------------------------
+
+            if isinstance(checkpoint, dict):
+
+                checkpoint_classes = checkpoint.get(
+                    "classes"
+                )
+
+                if checkpoint_classes:
+
+                    if list(checkpoint_classes) != list(CLASSES):
+
+                        raise RuntimeError(
+                            "Class order mismatch.\n"
+                            f"Model classes: {checkpoint_classes}\n"
+                            f"Service classes: {CLASSES}"
+                        )
+
+
+            # -----------------------------------------------
+            # Load weights
+            # -----------------------------------------------
+
+            self.model.load_state_dict(
+                state_dict,
+                strict=True
+            )
+
+
+            # -----------------------------------------------
+            # Move to device
+            # -----------------------------------------------
+
+            self.model.to(
+                self.device
+            )
 
             self.model.eval()
+
+
+            # -----------------------------------------------
+            # Success
+            # -----------------------------------------------
 
             self.model_loaded = True
 
             self.model_trained = True
+
+            self.load_error = None
+
+
+            print("====================================")
+            print("MODEL LOADED SUCCESSFULLY")
+            print(f"Version: {self.model_version}")
+            print(f"Classes: {CLASSES}")
+            print("====================================")
+
 
         except Exception as error:
 
@@ -191,6 +255,15 @@ class WasteClassifier:
 
             self.load_error = str(error)
 
+            print("====================================")
+            print("MODEL LOAD FAILED")
+            print(str(error))
+            print("====================================")
+
+
+    # ========================================================
+    # PREDICT
+    # ========================================================
 
     def predict(
         self,
@@ -211,14 +284,23 @@ class WasteClassifier:
             )
 
 
+        # -----------------------------------------------
+        # Preprocess
+        # -----------------------------------------------
+
         image = preprocess_image(
             image_bytes
         )
+
 
         image = image.to(
             self.device
         )
 
+
+        # -----------------------------------------------
+        # Prediction
+        # -----------------------------------------------
 
         with torch.no_grad():
 
@@ -232,6 +314,10 @@ class WasteClassifier:
             )[0]
 
 
+        # -----------------------------------------------
+        # Top 3
+        # -----------------------------------------------
+
         values, indices = torch.topk(
             probabilities,
             k=min(
@@ -241,20 +327,27 @@ class WasteClassifier:
         )
 
 
-        prediction_index = (
-            int(indices[0].item())
+        prediction_index = int(
+            indices[0].item()
         )
 
-        prediction = (
-            CLASSES[prediction_index]
-        )
+
+        prediction = CLASSES[
+            prediction_index
+        ]
+
 
         confidence = float(
             values[0].item()
         )
 
 
+        # -----------------------------------------------
+        # Alternatives
+        # -----------------------------------------------
+
         alternatives = []
+
 
         for value, index in zip(
             values[1:],
@@ -276,12 +369,18 @@ class WasteClassifier:
             })
 
 
-        compartment = (
-            self.get_compartment(
-                prediction
-            )
+        # -----------------------------------------------
+        # Compartment
+        # -----------------------------------------------
+
+        compartment = self.get_compartment(
+            prediction
         )
 
+
+        # -----------------------------------------------
+        # Confidence check
+        # -----------------------------------------------
 
         needs_review = (
             confidence <
@@ -314,6 +413,10 @@ class WasteClassifier:
         }
 
 
+    # ========================================================
+    # COMPARTMENT
+    # ========================================================
+
     @staticmethod
     def get_compartment(
         category: str
@@ -334,10 +437,15 @@ class WasteClassifier:
                 "GENERAL-01"
         }
 
+
         return slots.get(
             category,
             "GENERAL-01"
         )
 
+
+# ============================================================
+# GLOBAL CLASSIFIER
+# ============================================================
 
 classifier = WasteClassifier()
