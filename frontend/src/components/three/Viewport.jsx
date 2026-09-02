@@ -2,11 +2,6 @@ import React from 'react';
 import { Canvas } from '@react-three/fiber';
 import {
   OrbitControls,
-<<<<<<< HEAD
- 
-=======
-  
->>>>>>> 7eaa01b (Update waste classification model)
   Grid,
   PerspectiveCamera,
 } from '@react-three/drei';
@@ -24,6 +19,7 @@ function Viewport() {
           alpha: false,
         }}
       >
+        {/* Camera */}
         <PerspectiveCamera
           makeDefault
           position={[6, 4, 7]}
@@ -46,7 +42,7 @@ function Viewport() {
           intensity={2}
         />
 
-        {/* Floor */}
+        {/* Floor Grid */}
         <Grid
           args={[20, 20]}
           cellSize={0.5}
@@ -62,14 +58,7 @@ function Viewport() {
         {/* Robot */}
         <RobotModel />
 
-        {/* Environment */}
-<<<<<<< HEAD
-        
-=======
-       
->>>>>>> 7eaa01b (Update waste classification model)
-
-        {/* Camera controls */}
+        {/* Camera Controls */}
         <OrbitControls
           enableDamping
           dampingFactor={0.08}
