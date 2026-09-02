@@ -401,132 +401,42 @@ export const auth = {
    IMPORTANT:
    Robot demo operations DO NOT REQUIRE LOGIN.
 ============================================================ */
+/* ============================================================
+   ROBOTS
+============================================================ */
 
 export const robots = {
-  /*
-   * GET /robots
-   *
-   * No login required.
-   */
   list: () => {
-    return get(
-      "/robots",
-      undefined,
-      {
-        skipAuth: true,
-      }
-    );
+    return get('/robots');
   },
 
-  /*
-   * GET /robots/:robotId
-   */
-  one: (
-    robotId
-  ) => {
-    return get(
-      `/robots/${robotId}`,
-      undefined,
-      {
-        skipAuth: true,
-      }
-    );
+  one: (robotId) => {
+    return get(`/robots/${robotId}`);
   },
 
-  /*
-   * GET /robots/:robotId/telemetry
-   */
-  telemetry: (
-    robotId
-  ) => {
-    return get(
-      `/robots/${robotId}/telemetry`,
-      undefined,
-      {
-        skipAuth: true,
-      }
-    );
+  telemetry: (robotId) => {
+    return get(`/robots/${robotId}/telemetry`);
   },
 
-  /*
-   * POST /robots/:robotId/dispatch
-   *
-   * Example:
-   *
-   * robots.dispatch("ROBOT-001", {
-   *   department: "OT",
-   *   expectedCategory: "yellow",
-   *   confidence: 0.94,
-   *   wasteId: "MW-0001"
-   * })
-   */
-  dispatch: (
-    robotId,
-    body = {}
-  ) => {
-    if (!robotId) {
-      return Promise.reject(
-        new Error(
-          "Robot ID is required to dispatch a robot."
-        )
-      );
-    }
-
+  dispatch: (robotId, body = {}) => {
     return post(
       `/robots/${robotId}/dispatch`,
-      body,
-      {
-        skipAuth: true,
-      }
+      body
     );
   },
 
-  /*
-   * POST /robots/:robotId/recall
-   */
-  recall: (
-    robotId
-  ) => {
-    return post(
-      `/robots/${robotId}/recall`,
-      undefined,
-      {
-        skipAuth: true,
-      }
-    );
+  recall: (robotId) => {
+    return post(`/robots/${robotId}/recall`);
   },
 
-  /*
-   * POST /robots/:robotId/stop
-   */
-  stop: (
-    robotId
-  ) => {
-    return post(
-      `/robots/${robotId}/stop`,
-      undefined,
-      {
-        skipAuth: true,
-      }
-    );
+  stop: (robotId) => {
+    return post(`/robots/${robotId}/stop`);
   },
 
-  /*
-   * POST /robots/:robotId/clear-stop
-   */
-  clearStop: (
-    robotId
-  ) => {
-    return post(
-      `/robots/${robotId}/clear-stop`,
-      undefined,
-      {
-        skipAuth: true,
-      }
-    );
+  clearStop: (robotId) => {
+    return post(`/robots/${robotId}/clear-stop`);
   },
 };
-
 /* ============================================================
    WASTE
 ============================================================ */
