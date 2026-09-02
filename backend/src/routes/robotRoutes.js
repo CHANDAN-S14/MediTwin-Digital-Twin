@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router } from 'express';
 
 import {
   listRobots,
@@ -8,50 +8,22 @@ import {
   recallRobot,
   stopRobot,
   clearRobotStop,
-} from "../controllers/robotController.js";
+} from '../controllers/robotController.js';
 
 const router = Router();
 
-/*
- * ============================================================
- * PUBLIC ROBOT DEMO API
- * No login required.
- * ============================================================
- */
+router.get('/', listRobots);
 
-router.get(
-  "/",
-  listRobots
-);
+router.get('/:robotId', getRobot);
 
-router.get(
-  "/:robotId",
-  getRobot
-);
+router.get('/:robotId/telemetry', getTelemetry);
 
-router.get(
-  "/:robotId/telemetry",
-  getTelemetry
-);
+router.post('/:robotId/dispatch', dispatchRobot);
 
-router.post(
-  "/:robotId/dispatch",
-  dispatchRobot
-);
+router.post('/:robotId/recall', recallRobot);
 
-router.post(
-  "/:robotId/recall",
-  recallRobot
-);
+router.post('/:robotId/stop', stopRobot);
 
-router.post(
-  "/:robotId/stop",
-  stopRobot
-);
-
-router.post(
-  "/:robotId/clear-stop",
-  clearRobotStop
-);
+router.post('/:robotId/clear-stop', clearRobotStop);
 
 export default router;
