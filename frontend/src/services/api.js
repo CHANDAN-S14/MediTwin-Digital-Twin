@@ -22,6 +22,42 @@ export const api = axios.create({
 });
 
 
+
+export const robots = {
+  list: () =>
+    get('/robots'),
+
+  one: (robotId) =>
+    get(`/robots/${robotId}`),
+
+  telemetry: (robotId) =>
+    get(`/robots/${robotId}/telemetry`),
+
+  dispatch: (robotId, body = {}) => {
+    if (robotId) {
+      return post(
+        `/robots/${robotId}/dispatch`,
+        body
+      );
+    }
+
+    return post(
+      '/robots/dispatch',
+      body
+    );
+  },
+
+  recall: (robotId) =>
+    post(`/robots/${robotId}/recall`),
+
+  stop: (robotId) =>
+    post(`/robots/${robotId}/stop`),
+
+  clearStop: (robotId) =>
+    post(`/robots/${robotId}/clear-stop`),
+};
+
+
 /* ============================================================
    TOKEN MANAGEMENT
 ============================================================ */
