@@ -434,15 +434,22 @@ export const robots = {
   },
 
 
-  dispatch: (
-    robotId,
-    body = {}
-  ) => {
+dispatch: (
+  robotId,
+  body = {}
+) => {
+  if (robotId) {
     return post(
       `/robots/${robotId}/dispatch`,
       body
     );
-  },
+  }
+
+  return post(
+    `/robots/dispatch`,
+    body
+  );
+},
 
 
   recall: (
