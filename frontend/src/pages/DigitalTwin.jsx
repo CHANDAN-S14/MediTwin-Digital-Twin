@@ -207,7 +207,7 @@ function Robot({ position, status }) {
         color="#111827"
         anchorX="center"
       >
-        MB-01
+        MEDI-001
       </Text>
     </group>
   );
@@ -286,7 +286,7 @@ function Scene({ robot, wasteVisible, wastePosition }) {
 
 export default function DigitalTwin() {
   const [robot, setRobot] = useState({
-    robotId: 'MB-01',
+    robotId: 'MEDI-001',
     status: 'IDLE',
     position: {
       x: 0,
@@ -313,7 +313,7 @@ export default function DigitalTwin() {
     connectDigitalTwin();
 
     const handleStatus = (data) => {
-      if (data.robotId !== 'MB-01') return;
+      if (data.robotId !== 'MEDI-001') return;
 
       setRobot((previous) => ({
         ...previous,
@@ -338,7 +338,7 @@ export default function DigitalTwin() {
     };
 
     const handlePosition = (data) => {
-      if (data.robotId !== 'MB-01') return;
+      if (data.robotId !== 'MEDI-001') return;
 
       setRobot((previous) => ({
         ...previous,
@@ -347,7 +347,7 @@ export default function DigitalTwin() {
     };
 
     const handleWasteCollected = (data) => {
-      if (data.robotId !== 'MB-01') return;
+      if (data.robotId !== MEDI-001') return;
 
       setWaste((previous) => ({
         ...previous,
@@ -356,7 +356,7 @@ export default function DigitalTwin() {
     };
 
     const handleWasteDeposited = (data) => {
-      if (data.robotId !== 'MB-01') return;
+      if (data.robotId !== 'MEDI-001') return;
 
       setWaste((previous) => ({
         ...previous,
