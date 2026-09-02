@@ -13,33 +13,62 @@ import { requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
+
 /*
- * ============================================================
- * DEMO MODE
- * ============================================================
- *
- * Waste Management is available without login for the SIH demo.
- *
- * IMPORTANT:
- * Delete remains admin-only.
+|--------------------------------------------------------------------------
+| DEMO MODE
+|--------------------------------------------------------------------------
+|
+| No login required for:
+|
+| GET    /waste
+| POST   /waste
+| GET    /waste/:id
+| PATCH  /waste/:id/category
+| GET    /waste/export
+|
+*/
+
+
+router.get(
+  '/export',
+  exportWaste
+);
+
+
+router.get(
+  '/',
+  listWaste
+);
+
+
+router.post(
+  '/',
+  createWaste
+);
+
+
+router.get(
+  '/:id',
+  getWaste
+);
+
+
+router.patch(
+  '/:id/category',
+  reclassifyWaste
+);
+
+
+/*
+ * Keep deletion protected.
  */
 
-// GET all waste
-router.get('/', listWaste);
+router.delete(
+  '/:id',
+  requireRole('admin'),
+  deleteWaste
+);
 
-// GET CSV export
-router.get('/export', exportWaste);
-
-// CREATE waste
-router.post('/', createWaste);
-
-// GET one waste record
-router.get('/:id', getWaste);
-
-// UPDATE category
-router.patch('/:id/category', reclassifyWaste);
-
-// DELETE remains protected
-router.delete('/:id', requireRole('admin'), deleteWaste);
 
 export default router;
