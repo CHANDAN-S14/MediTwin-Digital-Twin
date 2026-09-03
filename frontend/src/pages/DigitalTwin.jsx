@@ -356,201 +356,153 @@ export default function DigitalTwin() {
    * ============================================================
    */
 
-  useEffect(() => {
-    connectDigitalTwin();
+ useEffect(() => {
+  console.log("🌐 Digital Twin component mounted");
 
-    /*
-     * ROBOT STATUS
-     */
-    const handleStatus = (data) => {
-      console.log(
-        '🤖 ROBOT STATUS:',
-        data
-      );
-
-      // IMPORTANT:
-      // Only MEDI-001 controls this Digital Twin.
-      if (
-        data?.robotId !== ROBOT_ID
-      ) {
-        return;
-      }
-
-      setRobot((previous) => ({
-        ...previous,
-
-        ...data,
-
-        robotId: ROBOT_ID,
-      }));
-
-      /*
-       * Robot reached waste pickup location.
-       */
-      if (
-        data.status ===
-        'ARRIVED_AT_PICKUP'
-      ) {
-        setWaste((previous) => ({
-          ...previous,
-
-          visible: true,
-        }));
-      }
-
-      /*
-       * Robot collected the waste.
-       */
-      if (
-        data.status === 'COLLECTING'
-      ) {
-        setWaste((previous) => ({
-          ...previous,
-
-          visible: false,
-        }));
-      }
-    };
-
-    /*
-     * ROBOT POSITION
-     */
-    const handlePosition = (data) => {
-      console.log(
-        '📍 ROBOT POSITION:',
-        data
-      );
-
-      if (
-        data?.robotId !== ROBOT_ID
-      ) {
-        return;
-      }
-
-      if (!data?.position) {
-        return;
-      }
-
-      setRobot((previous) => ({
-        ...previous,
-
-        position: {
-          x:
-            Number(
-              data.position.x
-            ) || 0,
-
-          y:
-            Number(
-              data.position.y
-            ) || 0,
-
-          z:
-            Number(
-              data.position.z
-            ) || 0,
-        },
-      }));
-    };
-
-    /*
-     * WASTE COLLECTED
-     */
-    const handleWasteCollected = (
+  const handleStatus = (data) => {
+    console.log(
+      "🤖 ROBOT STATUS:",
       data
-    ) => {
-      console.log(
-        '♻️ WASTE COLLECTED:',
-        data
-      );
+    );
 
-      if (
-        data?.robotId !== ROBOT_ID
-      ) {
-        return;
-      }
+    if (data?.robotId !== ROBOT_ID) {
+      return;
+    }
 
+    setRobot((previous) => ({
+      ...previous,
+      ...data,
+      robotId: ROBOT_ID,
+    }));
+
+    if (
+      data.status === "ARRIVED_AT_PICKUP"
+    ) {
       setWaste((previous) => ({
         ...previous,
-
-        visible: false,
+        visible: true,
       }));
-    };
+    }
 
-    /*
-     * WASTE DEPOSITED
-     */
-    const handleWasteDeposited = (
-      data
-    ) => {
-      console.log(
-        '🗑️ WASTE DEPOSITED:',
-        data
-      );
-
-      if (
-        data?.robotId !== ROBOT_ID
-      ) {
-        return;
-      }
-
+    if (
+      data.status === "COLLECTING"
+    ) {
       setWaste((previous) => ({
         ...previous,
-
         visible: false,
       }));
-    };
+    }
+  };
 
-    /*
-     * REGISTER SOCKET EVENTS
-     */
+  const handlePosition = (data) => {
+    console.log(
+      "📍 ROBOT POSITION:",
+      data
+    );
 
-    socket.on(
-      'robot:status',
+    if (data?.robotId !== ROBOT_ID) {
+      return;
+    }
+
+    if (!data?.position) {
+      return;
+    }
+
+    setRobot((previous) => ({
+      ...previous,
+
+      position: {
+        x: Number(data.position.x) || 0,
+        y: Number(data.position.y) || 0,
+        z: Number(data.position.z) || 0,
+      },
+    }));
+  };
+
+  const handleWasteCollected = (data) => {
+    console.log(
+      "♻️ WASTE COLLECTED:",
+      data
+    );
+
+    if (data?.robotId !== ROBOT_ID) {
+      return;
+    }
+
+    setWaste((previous) => ({
+      ...previous,
+      visible: false,
+    }));
+  };
+
+  const handleWasteDeposited = (data) => {
+    console.log(
+      "🗑️ WASTE DEPOSITED:",
+      data
+    );
+
+    if (data?.robotId !== ROBOT_ID) {
+      return;
+    }
+
+    setWaste((previous) => ({
+      ...previous,
+      visible: false,
+    }));
+  };
+
+  // REGISTER LISTENERS FIRST
+
+  socket.on(
+    "robot:status",
+    handleStatus
+  );
+
+  socket.on(
+    "robot:position",
+    handlePosition
+  );
+
+  socket.on(
+    "waste:collected",
+    handleWasteCollected
+  );
+
+  socket.on(
+    "waste:deposited",
+    handleWasteDeposited
+  );
+
+  // CONNECT AFTER LISTENERS ARE READY
+
+  connectDigitalTwin();
+
+  return () => {
+    console.log(
+      "🔌 Cleaning Digital Twin socket listeners"
+    );
+
+    socket.off(
+      "robot:status",
       handleStatus
     );
 
-    socket.on(
-      'robot:position',
+    socket.off(
+      "robot:position",
       handlePosition
     );
 
-    socket.on(
-      'waste:collected',
+    socket.off(
+      "waste:collected",
       handleWasteCollected
     );
 
-    socket.on(
-      'waste:deposited',
+    socket.off(
+      "waste:deposited",
       handleWasteDeposited
     );
-
-    /*
-     * CLEANUP
-     */
-
-    return () => {
-      socket.off(
-        'robot:status',
-        handleStatus
-      );
-
-      socket.off(
-        'robot:position',
-        handlePosition
-      );
-
-      socket.off(
-        'waste:collected',
-        handleWasteCollected
-      );
-
-      socket.off(
-        'waste:deposited',
-        handleWasteDeposited
-      );
-    };
-  }, []);
+  };
+}, []);
 
   /*
    * ============================================================
