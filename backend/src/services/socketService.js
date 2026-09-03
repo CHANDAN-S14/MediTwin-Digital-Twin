@@ -18,11 +18,7 @@ export const EVENTS = {
 export function initializeSocket(server) {
   io = new Server(server, {
     cors: {
-      origin: [
-        "http://localhost:5173",
-        "https://mediatwin.netlify.app",
-      ],
-
+      origin: true,
       methods: [
         "GET",
         "POST",
@@ -31,7 +27,6 @@ export function initializeSocket(server) {
         "DELETE",
         "OPTIONS",
       ],
-
       credentials: true,
     },
   });
@@ -71,7 +66,6 @@ export function initializeSocket(server) {
 
   return io;
 }
-
 export function getIO() {
   if (!io) {
     throw new Error(
