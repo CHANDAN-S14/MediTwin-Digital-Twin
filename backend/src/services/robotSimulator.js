@@ -1,200 +1,285 @@
 import Robot from "../models/Robot.js";
-import ApiError from "../utils/ApiError.js";
-import asyncHandler from "../utils/asyncHandler.js";
 
 import {
-  startCollection,
-  recallCollection,
-  stopCollection,
-  clearStopCollection,
-} from "../services/robotSimulator.js";
+  emitRobotStatus,
+  emitRobotPosition,
+  emitDigitalTwinUpdate,
+  emitWasteCollected,
+  emitWasteDeposited,
+  emitTaskUpdated,
+} from "./socketService.js";
 
-import { emitRobotStatus } from "../services/socketService.js";
+const activeCollections = new Map();
 
-/* ============================================================
-   GET ALL ROBOTS
-   GET /api/v1/robots
-============================================================ */
+const sleep = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
-export const listRobots = asyncHandler(async (_req, res) => {
-  const robots = await Robot.find({})
-    .sort({ robotId: 1 })
-    .lean();
+/*
+|--------------------------------------------------------------------------
+| Department positions
+|--------------------------------------------------------------------------
+*/
 
-  res.json({
-    success: true,
-    data: robots,
-  });
-});
+const ROBOT_PATHS = {
+  OT: {
+    x: -7,
+    z: 3,
+  },
 
-/* ============================================================
-   GET SINGLE ROBOT
-   GET /api/v1/robots/:robotId
-============================================================ */
+  ICU: {
+    x: -6,
+    z: -4,
+  },
 
-export const getRobot = asyncHandler(async (req, res) => {
-  const { robotId } = req.params;
+  WARD: {
+    x: 7,
+    z: -3,
+  },
 
-  const robot = await Robot.findOne({
-    robotId,
-  }).lean();
+  GENERAL: {
+    x: 0,
+    z: 7,
+  },
+};
 
-  if (!robot) {
-    throw ApiError.notFound(
-      `Robot ${robotId} not found`
-    );
-  }
+/*
+|--------------------------------------------------------------------------
+| Waste bin positions
+|--------------------------------------------------------------------------
+*/
 
-  res.json({
-    success: true,
-    data: robot,
-  });
-});
+const BIN_POSITIONS = {
+  yellow: {
+    x: -7,
+    z: -7,
+  },
 
-/* ============================================================
-   GET ROBOT TELEMETRY
-   GET /api/v1/robots/:robotId/telemetry
-============================================================ */
+  red: {
+    x: 0,
+    z: -7,
+  },
 
-export const getTelemetry = asyncHandler(async (req, res) => {
-  const { robotId } = req.params;
+  blue: {
+    x: 7,
+    z: -7,
+  },
 
-  const robot = await Robot.findOne({
-    robotId,
-  }).lean();
+  general: {
+    x: 7,
+    z: 7,
+  },
+};
 
-  if (!robot) {
-    throw ApiError.notFound(
-      `Robot ${robotId} not found`
-    );
-  }
+/*
+|--------------------------------------------------------------------------
+| Helpers
+|--------------------------------------------------------------------------
+*/
 
-  res.json({
-    success: true,
+const getDepartmentPosition = (department = "OT") => {
+  return (
+    ROBOT_PATHS[String(department).toUpperCase()] ??
+    ROBOT_PATHS.GENERAL
+  );
+};
 
-    data: {
-      robotId: robot.robotId,
+const getBinPosition = (category = "general") => {
+  return (
+    BIN_POSITIONS[String(category).toLowerCase()] ??
+    BIN_POSITIONS.general
+  );
+};
 
-      status: robot.status,
+/*
+|--------------------------------------------------------------------------
+| Move robot
+|--------------------------------------------------------------------------
+|
+| This is the actual digital-twin movement loop.
+| Every step:
+|
+| 1. Updates MongoDB
+| 2. Emits robot:position
+| 3. Emits digitalTwin:update
+|
+*/
 
-      battery: robot.battery,
+const moveRobot = async ({
+  robotId,
+  from,
+  to,
+  status,
+  activity,
+  duration = 5000,
+}) => {
+  const steps = 30;
 
-      location: robot.currentLocation,
+  const stepDelay = Math.max(
+    50,
+    Math.floor(duration / steps)
+  );
 
-      targetLocation: robot.targetLocation,
+  /*
+  |----------------------------------------------------------------------
+  | Update initial movement state
+  |----------------------------------------------------------------------
+  */
 
-      targetBin: robot.targetBin,
-
-      load: robot.load ?? 0,
-
-      position: {
-        x: Number(robot.position?.x) || 0,
-        y: Number(robot.position?.y) || 0,
-        z: Number(robot.position?.z) || 0,
+  await Robot.findOneAndUpdate(
+    { robotId },
+    {
+      $set: {
+        status,
+        currentLocation: activity,
+        targetLocation: activity,
+        lastActivity: activity,
       },
-
-      lastActivity:
-        robot.lastActivity ||
-        "Waiting for task",
-    },
-  });
-});
-
-/* ============================================================
-   DISPATCH ROBOT
-   POST /api/v1/robots/:robotId/dispatch
-============================================================ */
-
-export const dispatchRobot = asyncHandler(async (req, res) => {
-  const { robotId } = req.params;
-
-  const {
-    department = "OT",
-    expectedCategory = "general",
-    confidence = 1,
-    wasteId = null,
-  } = req.body || {};
-
-  console.log(
-    "================================================"
+    }
   );
 
-  console.log("🚀 ROBOT DISPATCH REQUEST");
-
-  console.log({
-    robotId,
-    department,
-    expectedCategory,
-    confidence,
-    wasteId,
+  emitRobotStatus(robotId, {
+    status,
+    currentLocation: activity,
+    targetLocation: activity,
+    lastActivity: activity,
   });
 
-  console.log(
-    "================================================"
-  );
+  /*
+  |----------------------------------------------------------------------
+  | Move
+  |----------------------------------------------------------------------
+  */
 
-  /* ----------------------------------------------------------
-     FIND ROBOT
-  ---------------------------------------------------------- */
+  for (let i = 1; i <= steps; i += 1) {
+    const simulation = activeCollections.get(robotId);
+
+    /*
+     * Stop movement immediately when cancelled.
+     */
+    if (!simulation || simulation.cancelled) {
+      return false;
+    }
+
+    const progress = i / steps;
+
+    const x =
+      from.x +
+      (to.x - from.x) * progress;
+
+    const z =
+      from.z +
+      (to.z - from.z) * progress;
+
+    /*
+     * Save position to MongoDB
+     */
+    await Robot.findOneAndUpdate(
+      { robotId },
+      {
+        $set: {
+          "position.x": x,
+          "position.y": 0,
+          "position.z": z,
+        },
+      }
+    );
+
+    /*
+     * Send position to frontend
+     */
+    emitRobotPosition(robotId, {
+      x,
+      y: 0,
+      z,
+    });
+
+    /*
+     * Send complete digital twin update
+     */
+    emitDigitalTwinUpdate(robotId, {
+      status,
+      position: {
+        x,
+        y: 0,
+        z,
+      },
+      currentLocation: activity,
+      targetLocation: activity,
+      lastActivity: activity,
+    });
+
+    await sleep(stepDelay);
+  }
+
+  return true;
+};
+
+/*
+|--------------------------------------------------------------------------
+| START COLLECTION
+|--------------------------------------------------------------------------
+*/
+
+export const startCollection = async ({
+  hospitalId = null,
+  robotId,
+  department = "OT",
+  expectedCategory = "general",
+  confidence = 1,
+  wasteId = null,
+  requestedBy = null,
+}) => {
+  if (!robotId) {
+    throw new Error("Robot ID is required");
+  }
+
+  /*
+   * Prevent duplicate tasks.
+   */
+
+  if (activeCollections.has(robotId)) {
+    throw new Error(
+      `Robot ${robotId} already has an active collection`
+    );
+  }
+
+  /*
+   * Find robot
+   */
 
   const robot = await Robot.findOne({
     robotId,
   });
 
   if (!robot) {
-    throw ApiError.notFound(
+    throw new Error(
       `Robot ${robotId} not found`
     );
   }
 
-  /* ----------------------------------------------------------
-     CHECK ROBOT STATUS
-  ---------------------------------------------------------- */
+  /*
+   * Robot must be idle
+   */
 
   if (robot.status !== "IDLE") {
-    throw ApiError.conflict(
-      `Robot ${robot.robotId} is currently ${robot.status}`
+    throw new Error(
+      `Robot ${robotId} is currently ${robot.status}`
     );
   }
 
-  /* ----------------------------------------------------------
-     CHECK BATTERY
-  ---------------------------------------------------------- */
+  /*
+   * Battery check
+   */
 
-  const battery = Number(robot.battery ?? 0);
-
-  if (battery <= 15) {
-    throw ApiError.conflict(
-      `Robot ${robot.robotId} does not have enough battery`
+  if (Number(robot.battery ?? 0) <= 15) {
+    throw new Error(
+      `Robot ${robotId} does not have enough battery`
     );
   }
 
-  /* ----------------------------------------------------------
-     VALIDATE DEPARTMENT
-  ---------------------------------------------------------- */
-
-  const validDepartments = [
-    "OT",
-    "ICU",
-    "WARD",
-    "GENERAL",
-  ];
-
-  const normalizedDepartment =
-    String(department || "OT")
-      .trim()
-      .toUpperCase();
-
-  const finalDepartment =
-    validDepartments.includes(
-      normalizedDepartment
-    )
-      ? normalizedDepartment
-      : "GENERAL";
-
-  /* ----------------------------------------------------------
-     VALIDATE CATEGORY
-  ---------------------------------------------------------- */
+  /*
+   * Valid categories
+   */
 
   const validCategories = [
     "yellow",
@@ -203,204 +288,690 @@ export const dispatchRobot = asyncHandler(async (req, res) => {
     "general",
   ];
 
-  const normalizedCategory =
-    String(expectedCategory || "general")
-      .trim()
-      .toLowerCase();
-
-  const finalCategory =
+  const category =
     validCategories.includes(
-      normalizedCategory
+      String(expectedCategory).toLowerCase()
     )
-      ? normalizedCategory
+      ? String(expectedCategory).toLowerCase()
       : "general";
 
-  /* ----------------------------------------------------------
-     CONFIDENCE
-  ---------------------------------------------------------- */
+  /*
+   * Create task
+   */
 
-  const finalConfidence =
-    Number(confidence) || 0;
+  const taskId = `TASK-${Date.now()}`;
 
-  /* ----------------------------------------------------------
-     START SIMULATION
-  ---------------------------------------------------------- */
-
-  const task = await startCollection({
-    hospitalId: robot.hospitalId ?? null,
-
-    robotId: robot.robotId,
-
-    department: finalDepartment,
-
-    expectedCategory: finalCategory,
-
-    confidence: finalConfidence,
-
+  const task = {
+    _id: taskId,
+    taskId,
+    robotId,
+    hospitalId,
+    department:
+      department || "OT",
+    expectedCategory: category,
+    confidence,
     wasteId,
+    status: "ACTIVE",
+    createdAt: new Date(),
+    requestedBy,
+  };
 
-    requestedBy: null,
+  /*
+   * Register active simulation
+   */
+
+  activeCollections.set(robotId, {
+    taskId,
+    cancelled: false,
   });
 
-  /* ----------------------------------------------------------
-     IMPORTANT:
-     The simulator is now responsible for the complete
-     movement lifecycle.
+  /*
+   * Run simulation asynchronously.
+   *
+   * IMPORTANT:
+   * We don't await this here.
+   * The API can immediately return 201.
+   */
 
-     We only tell connected Digital Twin clients that the
-     robot has been dispatched.
+  runCollection({
+    robotId,
+    department: department || "OT",
+    expectedCategory: category,
+    wasteId,
+    hospitalId,
+    task,
+  }).catch(async (error) => {
+    console.error(
+      `Robot simulation error for ${robotId}:`,
+      error
+    );
 
-     DO NOT send COLLECTING here.
-  ---------------------------------------------------------- */
+    activeCollections.delete(robotId);
 
-  emitRobotStatus(robot.robotId, {
-    status: "DISPATCHED",
+    await Robot.findOneAndUpdate(
+      { robotId },
+      {
+        $set: {
+          status: "IDLE",
+          currentTaskId: null,
+          targetLocation: null,
+          targetBin: null,
+          load: 0,
+          lastActivity:
+            "Simulation error - returned to idle",
+        },
+      }
+    );
 
-    currentLocation:
-      robot.currentLocation ||
-      "Charging Station",
-
-    targetLocation:
-      finalDepartment,
-
-    targetBin:
-      finalCategory,
-
-    lastActivity:
-      `Dispatched to ${finalDepartment}`,
+    emitRobotStatus(robotId, {
+      status: "IDLE",
+      currentLocation: "Charging Station",
+      targetLocation: null,
+      targetBin: null,
+      load: 0,
+      lastActivity:
+        "Simulation error - returned to idle",
+    });
   });
 
-  /* ----------------------------------------------------------
-     RESPONSE
-  ---------------------------------------------------------- */
+  return task;
+};
 
-  res.status(201).json({
-    success: true,
+/*
+|--------------------------------------------------------------------------
+| RUN COLLECTION
+|--------------------------------------------------------------------------
+*/
 
-    message:
-      `Robot ${robot.robotId} collection started`,
+const runCollection = async ({
+  robotId,
+  department,
+  expectedCategory,
+  wasteId,
+  hospitalId,
+  task,
+}) => {
+  const simulation =
+    activeCollections.get(robotId);
 
-    data: {
-      task,
+  if (!simulation) {
+    return;
+  }
 
-      robotId:
-        robot.robotId,
+  try {
+    /*
+     * Get robot's current position
+     */
 
-      department:
-        finalDepartment,
+    const robot = await Robot.findOne({
+      robotId,
+    });
 
-      expectedCategory:
-        finalCategory,
+    if (!robot) {
+      throw new Error(
+        `Robot ${robotId} not found`
+      );
+    }
 
-      confidence:
-        finalConfidence,
+    const start = {
+      x: Number(robot.position?.x) || 0,
+      z: Number(robot.position?.z) || 0,
+    };
 
+    /*
+     * Get target positions
+     */
+
+    const pickup =
+      getDepartmentPosition(department);
+
+    const bin =
+      getBinPosition(expectedCategory);
+
+    /*
+     * Mark robot dispatched
+     */
+
+    await Robot.findOneAndUpdate(
+      { robotId },
+      {
+        $set: {
+          status: "DISPATCHED",
+          currentTaskId: task.taskId,
+          targetLocation: department,
+          targetBin: expectedCategory,
+          lastActivity:
+            `Dispatched to ${department}`,
+        },
+      }
+    );
+
+    emitTaskUpdated({
+      ...task,
+      status: "ACTIVE",
+    });
+
+    emitRobotStatus(robotId, {
+      status: "DISPATCHED",
+      currentLocation:
+        "Charging Station",
+      targetLocation: department,
+      targetBin: expectedCategory,
+      lastActivity:
+        `Dispatched to ${department}`,
+    });
+
+    emitDigitalTwinUpdate(robotId, {
+      status: "DISPATCHED",
+      position: {
+        x: start.x,
+        y: 0,
+        z: start.z,
+      },
+      currentLocation:
+        "Charging Station",
+      targetLocation: department,
+      targetBin: expectedCategory,
+    });
+
+    await sleep(1000);
+
+    /*
+     * Check cancellation
+     */
+
+    if (
+      activeCollections.get(robotId)?.cancelled
+    ) {
+      return;
+    }
+
+    /*
+     * ============================================================
+     * 1. MOVE TO PICKUP
+     * ============================================================
+     */
+
+    const movedToPickup =
+      await moveRobot({
+        robotId,
+
+        from: start,
+
+        to: pickup,
+
+        status: "MOVING_TO_PICKUP",
+
+        activity:
+          `Moving to ${department}`,
+
+        duration: 5000,
+      });
+
+    if (!movedToPickup) {
+      return;
+    }
+
+    /*
+     * ============================================================
+     * 2. ARRIVE AT PICKUP
+     * ============================================================
+     */
+
+    await Robot.findOneAndUpdate(
+      { robotId },
+      {
+        $set: {
+          status: "ARRIVED_AT_PICKUP",
+          currentLocation: department,
+          targetLocation: department,
+          lastActivity:
+            `Arrived at ${department}`,
+        },
+      }
+    );
+
+    emitRobotStatus(robotId, {
+      status: "ARRIVED_AT_PICKUP",
+      currentLocation: department,
+      targetLocation: department,
+      targetBin: expectedCategory,
+      lastActivity:
+        `Arrived at ${department}`,
+    });
+
+    emitDigitalTwinUpdate(robotId, {
+      status: "ARRIVED_AT_PICKUP",
+      position: {
+        x: pickup.x,
+        y: 0,
+        z: pickup.z,
+      },
+      currentLocation: department,
+      targetLocation: department,
+      targetBin: expectedCategory,
+    });
+
+    await sleep(1500);
+
+    if (
+      activeCollections.get(robotId)?.cancelled
+    ) {
+      return;
+    }
+
+    /*
+     * ============================================================
+     * 3. COLLECT WASTE
+     * ============================================================
+     */
+
+    await Robot.findOneAndUpdate(
+      { robotId },
+      {
+        $set: {
+          status: "COLLECTING",
+          load: 1,
+          currentLocation: department,
+          lastActivity:
+            "Collecting biomedical waste",
+        },
+      }
+    );
+
+    emitRobotStatus(robotId, {
+      status: "COLLECTING",
+      currentLocation: department,
+      load: 1,
+      targetBin: expectedCategory,
+      lastActivity:
+        "Collecting biomedical waste",
+    });
+
+    emitDigitalTwinUpdate(robotId, {
+      status: "COLLECTING",
+      position: {
+        x: pickup.x,
+        y: 0,
+        z: pickup.z,
+      },
+      currentLocation: department,
+      targetLocation:
+        `${expectedCategory} bin`,
+      targetBin: expectedCategory,
+      load: 1,
+    });
+
+    await sleep(2500);
+
+    if (
+      activeCollections.get(robotId)?.cancelled
+    ) {
+      return;
+    }
+
+    /*
+     * Notify frontend
+     */
+
+    emitWasteCollected({
+      robotId,
+      hospitalId,
       wasteId,
-    },
-  });
-});
+      category: expectedCategory,
+      department,
+    });
 
-/* ============================================================
-   RECALL ROBOT
-   POST /api/v1/robots/:robotId/recall
-============================================================ */
+    /*
+     * ============================================================
+     * 4. MOVE TO BIN
+     * ============================================================
+     */
 
-export const recallRobot = asyncHandler(async (req, res) => {
-  const { robotId } = req.params;
+    const movedToBin =
+      await moveRobot({
+        robotId,
 
-  const robot = await Robot.findOne({
-    robotId,
-  });
+        from: {
+          x: pickup.x,
+          z: pickup.z,
+        },
 
-  if (!robot) {
-    throw ApiError.notFound(
-      `Robot ${robotId} not found`
+        to: bin,
+
+        status: "MOVING_TO_BIN",
+
+        activity:
+          `Moving to ${expectedCategory} bin`,
+
+        duration: 5000,
+      });
+
+    if (!movedToBin) {
+      return;
+    }
+
+    /*
+     * ============================================================
+     * 5. DEPOSIT
+     * ============================================================
+     */
+
+    await Robot.findOneAndUpdate(
+      { robotId },
+      {
+        $set: {
+          status: "DEPOSITING",
+
+          currentLocation:
+            `${expectedCategory} bin`,
+
+          targetLocation:
+            `${expectedCategory} bin`,
+
+          targetBin:
+            expectedCategory,
+
+          lastActivity:
+            `Depositing waste into ${expectedCategory} bin`,
+        },
+      }
+    );
+
+    emitRobotStatus(robotId, {
+      status: "DEPOSITING",
+
+      currentLocation:
+        `${expectedCategory} bin`,
+
+      targetLocation:
+        `${expectedCategory} bin`,
+
+      targetBin:
+        expectedCategory,
+
+      load: 1,
+
+      lastActivity:
+        `Depositing waste into ${expectedCategory} bin`,
+    });
+
+    emitDigitalTwinUpdate(robotId, {
+      status: "DEPOSITING",
+
+      position: {
+        x: bin.x,
+        y: 0,
+        z: bin.z,
+      },
+
+      currentLocation:
+        `${expectedCategory} bin`,
+
+      targetLocation:
+        `${expectedCategory} bin`,
+
+      targetBin:
+        expectedCategory,
+
+      load: 1,
+    });
+
+    await sleep(2500);
+
+    if (
+      activeCollections.get(robotId)?.cancelled
+    ) {
+      return;
+    }
+
+    /*
+     * Notify frontend
+     */
+
+    emitWasteDeposited({
+      robotId,
+      hospitalId,
+      wasteId,
+      category: expectedCategory,
+      bin: expectedCategory,
+    });
+
+    /*
+     * ============================================================
+     * 6. EMPTY ROBOT
+     * ============================================================
+     */
+
+    await Robot.findOneAndUpdate(
+      { robotId },
+      {
+        $set: {
+          load: 0,
+          lastActivity:
+            "Waste deposited successfully",
+        },
+      }
+    );
+
+    /*
+     * ============================================================
+     * 7. RETURN TO CHARGING STATION
+     * ============================================================
+     */
+
+    const returned =
+      await moveRobot({
+        robotId,
+
+        from: {
+          x: bin.x,
+          z: bin.z,
+        },
+
+        to: {
+          x: 0,
+          z: 0,
+        },
+
+        status: "RETURNING",
+
+        activity:
+          "Returning to charging station",
+
+        duration: 5000,
+      });
+
+    if (!returned) {
+      return;
+    }
+
+    /*
+     * ============================================================
+     * 8. COMPLETE
+     * ============================================================
+     */
+
+    await Robot.findOneAndUpdate(
+      { robotId },
+      {
+        $set: {
+          status: "IDLE",
+
+          currentLocation:
+            "Charging Station",
+
+          targetLocation: null,
+
+          targetBin: null,
+
+          currentTaskId: null,
+
+          load: 0,
+
+          lastActivity:
+            "Collection completed",
+
+          "position.x": 0,
+          "position.y": 0,
+          "position.z": 0,
+        },
+      }
+    );
+
+    emitRobotStatus(robotId, {
+      status: "IDLE",
+
+      currentLocation:
+        "Charging Station",
+
+      targetLocation: null,
+
+      targetBin: null,
+
+      load: 0,
+
+      lastActivity:
+        "Collection completed",
+    });
+
+    emitDigitalTwinUpdate(robotId, {
+      status: "IDLE",
+
+      position: {
+        x: 0,
+        y: 0,
+        z: 0,
+      },
+
+      currentLocation:
+        "Charging Station",
+
+      targetLocation: null,
+
+      targetBin: null,
+
+      load: 0,
+
+      lastActivity:
+        "Collection completed",
+    });
+
+    emitTaskUpdated({
+      ...task,
+      status: "COMPLETED",
+    });
+  } finally {
+    activeCollections.delete(robotId);
+  }
+};
+
+/*
+|--------------------------------------------------------------------------
+| STOP COLLECTION
+|--------------------------------------------------------------------------
+*/
+
+export const stopCollection = async (
+  robotId
+) => {
+  const simulation =
+    activeCollections.get(robotId);
+
+  if (!simulation) {
+    throw new Error(
+      `Robot ${robotId} has no active collection`
     );
   }
 
-  const result =
-    await recallCollection(robotId);
+  /*
+   * Tell movement loop to stop.
+   */
 
-  res.json({
-    success: true,
+  simulation.cancelled = true;
 
-    message:
-      "Robot recalled",
-
-    data: result,
-  });
-});
-
-/* ============================================================
-   STOP ROBOT
-   POST /api/v1/robots/:robotId/stop
-============================================================ */
-
-export const stopRobot = asyncHandler(async (req, res) => {
-  const { robotId } = req.params;
-
-  const robot = await Robot.findOne({
-    robotId,
-  });
-
-  if (!robot) {
-    throw ApiError.notFound(
-      `Robot ${robotId} not found`
-    );
-  }
-
-  const result =
-    await stopCollection(robotId);
+  await Robot.findOneAndUpdate(
+    { robotId },
+    {
+      $set: {
+        status: "STOPPED",
+        lastActivity:
+          "Emergency stop activated",
+      },
+    }
+  );
 
   emitRobotStatus(robotId, {
     status: "STOPPED",
-
-    currentLocation:
-      robot.currentLocation,
-
-    targetLocation:
-      robot.targetLocation,
-
-    targetBin:
-      robot.targetBin,
-
     lastActivity:
       "Emergency stop activated",
-
-    reason:
-      "Manual emergency stop",
   });
 
-  res.json({
-    success: true,
-
-    message:
-      "Robot stopped",
-
-    data: result,
+  emitDigitalTwinUpdate(robotId, {
+    status: "STOPPED",
+    lastActivity:
+      "Emergency stop activated",
   });
-});
 
-/* ============================================================
-   CLEAR STOP
-   POST /api/v1/robots/:robotId/clear-stop
-============================================================ */
-
-export const clearRobotStop = asyncHandler(async (req, res) => {
-  const { robotId } = req.params;
-
-  const robot = await Robot.findOne({
+  return {
     robotId,
-  });
+    status: "STOPPED",
+  };
+};
+
+/*
+|--------------------------------------------------------------------------
+| CLEAR STOP
+|--------------------------------------------------------------------------
+*/
+
+export const clearStopCollection = async (
+  robotId
+) => {
+  /*
+   * Remove old simulation.
+   */
+
+  activeCollections.delete(robotId);
+
+  const robot =
+    await Robot.findOneAndUpdate(
+      { robotId },
+
+      {
+        $set: {
+          status: "IDLE",
+
+          currentTaskId: null,
+
+          targetLocation: null,
+
+          targetBin: null,
+
+          load: 0,
+
+          currentLocation:
+            "Charging Station",
+
+          lastActivity:
+            "Stop cleared",
+
+          "position.x": 0,
+          "position.y": 0,
+          "position.z": 0,
+        },
+      },
+
+      {
+        new: true,
+      }
+    );
 
   if (!robot) {
-    throw ApiError.notFound(
+    throw new Error(
       `Robot ${robotId} not found`
     );
   }
-
-  const result =
-    await clearStopCollection(robotId);
 
   emitRobotStatus(robotId, {
     status: "IDLE",
@@ -408,22 +979,207 @@ export const clearRobotStop = asyncHandler(async (req, res) => {
     currentLocation:
       "Charging Station",
 
-    targetLocation:
-      null,
+    targetLocation: null,
 
-    targetBin:
-      null,
+    targetBin: null,
+
+    load: 0,
 
     lastActivity:
       "Stop cleared",
   });
 
-  res.json({
-    success: true,
+  emitDigitalTwinUpdate(robotId, {
+    status: "IDLE",
 
-    message:
-      "Robot stop cleared",
+    position: {
+      x: 0,
+      y: 0,
+      z: 0,
+    },
 
-    data: result,
+    currentLocation:
+      "Charging Station",
+
+    targetLocation: null,
+
+    targetBin: null,
+
+    load: 0,
+
+    lastActivity:
+      "Stop cleared",
   });
-});
+
+  return {
+    robotId,
+    status: "IDLE",
+  };
+};
+
+/*
+|--------------------------------------------------------------------------
+| RECALL
+|--------------------------------------------------------------------------
+*/
+
+export const recallCollection = async (
+  robotId
+) => {
+  const simulation =
+    activeCollections.get(robotId);
+
+  if (simulation) {
+    simulation.cancelled = true;
+  }
+
+  const robot =
+    await Robot.findOne({
+      robotId,
+    });
+
+  if (!robot) {
+    throw new Error(
+      `Robot ${robotId} not found`
+    );
+  }
+
+  /*
+   * IMPORTANT:
+   * This immediately changes the state.
+   *
+   * A separate return simulation can be
+   * implemented later if required.
+   */
+
+  await Robot.findOneAndUpdate(
+    { robotId },
+
+    {
+      $set: {
+        status: "RETURNING",
+
+        targetLocation:
+          "Charging Station",
+
+        lastActivity:
+          "Returning to charging station",
+      },
+    }
+  );
+
+  emitRobotStatus(robotId, {
+    status: "RETURNING",
+
+    targetLocation:
+      "Charging Station",
+
+    lastActivity:
+      "Returning to charging station",
+  });
+
+  emitDigitalTwinUpdate(robotId, {
+    status: "RETURNING",
+
+    targetLocation:
+      "Charging Station",
+
+    lastActivity:
+      "Returning to charging station",
+  });
+
+  return {
+    robotId,
+    status: "RETURNING",
+  };
+};
+
+/*
+|--------------------------------------------------------------------------
+| RUNNING COUNT
+|--------------------------------------------------------------------------
+*/
+
+export const runningCount = () => {
+  return activeCollections.size;
+};
+
+/*
+|--------------------------------------------------------------------------
+| STOP ALL
+|--------------------------------------------------------------------------
+*/
+
+export const stopAll = async () => {
+  /*
+   * Cancel simulations.
+   */
+
+  for (
+    const simulation
+    of activeCollections.values()
+  ) {
+    simulation.cancelled = true;
+  }
+
+  activeCollections.clear();
+
+  /*
+   * Reset all active robots.
+   */
+
+  await Robot.updateMany(
+    {
+      status: {
+        $in: [
+          "DISPATCHED",
+          "MOVING_TO_PICKUP",
+          "ARRIVED_AT_PICKUP",
+          "COLLECTING",
+          "MOVING_TO_BIN",
+          "DEPOSITING",
+          "RETURNING",
+        ],
+      },
+    },
+
+    {
+      $set: {
+        status: "IDLE",
+
+        currentTaskId: null,
+
+        targetLocation: null,
+
+        targetBin: null,
+
+        load: 0,
+
+        currentLocation:
+          "Charging Station",
+
+        lastActivity:
+          "Simulator stopped",
+
+        "position.x": 0,
+        "position.y": 0,
+        "position.z": 0,
+      },
+    }
+  );
+};
+
+/*
+|--------------------------------------------------------------------------
+| DEFAULT EXPORT
+|--------------------------------------------------------------------------
+*/
+
+export default {
+  startCollection,
+  stopCollection,
+  clearStopCollection,
+  recallCollection,
+  runningCount,
+  stopAll,
+};
