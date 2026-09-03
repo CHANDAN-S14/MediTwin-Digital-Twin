@@ -1,4 +1,3 @@
-
 import Robot from "../models/Robot.js";
 import ApiError from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
@@ -75,7 +74,6 @@ export const getTelemetry = asyncHandler(async (req, res) => {
 
     data: {
       robotId: robot.robotId,
-
       status: robot.status,
 
       battery: Number(
@@ -119,6 +117,7 @@ export const getTelemetry = asyncHandler(async (req, res) => {
 
 /* ============================================================
    DISPATCH ROBOT
+
    POST /api/v1/robots/:robotId/dispatch
 
    Example:
@@ -139,6 +138,7 @@ export const getTelemetry = asyncHandler(async (req, res) => {
 
 export const dispatchRobot = asyncHandler(
   async (req, res) => {
+
     const { robotId } = req.params;
 
     const {
@@ -196,16 +196,18 @@ export const dispatchRobot = asyncHandler(
        CHECK BATTERY
     -------------------------------------------------------- */
 
-    if (
-      Number(robot.battery ?? 0) <= 15
-    ) {
+    const battery = Number(
+      robot.battery ?? 0
+    );
+
+    if (battery <= 15) {
       throw ApiError.conflict(
         `Robot ${robotId} does not have enough battery`
       );
     }
 
     /* --------------------------------------------------------
-       VALID DEPARTMENTS
+       VALIDATE DEPARTMENT
     -------------------------------------------------------- */
 
     const validDepartments = [
@@ -216,9 +218,7 @@ export const dispatchRobot = asyncHandler(
     ];
 
     const normalizedDepartment =
-      String(
-        department || "OT"
-      )
+      String(department || "OT")
         .trim()
         .toUpperCase();
 
@@ -230,7 +230,7 @@ export const dispatchRobot = asyncHandler(
         : "GENERAL";
 
     /* --------------------------------------------------------
-       VALID WASTE CATEGORIES
+       VALIDATE WASTE CATEGORY
     -------------------------------------------------------- */
 
     const validCategories = [
@@ -301,7 +301,10 @@ export const dispatchRobot = asyncHandler(
       });
 
     /* --------------------------------------------------------
-       SEND SOCKET UPDATE
+       SOCKET UPDATE
+
+       Simulator controls actual movement.
+       Controller only announces dispatch.
     -------------------------------------------------------- */
 
     emitRobotStatus(
@@ -357,11 +360,13 @@ export const dispatchRobot = asyncHandler(
 
 /* ============================================================
    RECALL ROBOT
+
    POST /api/v1/robots/:robotId/recall
 ============================================================ */
 
 export const recallRobot = asyncHandler(
   async (req, res) => {
+
     const { robotId } = req.params;
 
     const robot =
@@ -406,11 +411,13 @@ export const recallRobot = asyncHandler(
 
 /* ============================================================
    STOP ROBOT
+
    POST /api/v1/robots/:robotId/stop
 ============================================================ */
 
 export const stopRobot = asyncHandler(
   async (req, res) => {
+
     const { robotId } = req.params;
 
     const robot =
@@ -434,11 +441,20 @@ export const stopRobot = asyncHandler(
       {
         status: "STOPPED",
 
-        reason:
-          "Manual emergency stop",
+        currentLocation:
+          robot.currentLocation,
+
+        targetLocation:
+          robot.targetLocation,
+
+        targetBin:
+          robot.targetBin,
 
         lastActivity:
           "Emergency stop activated",
+
+        reason:
+          "Manual emergency stop",
       }
     );
 
@@ -455,12 +471,14 @@ export const stopRobot = asyncHandler(
 
 /* ============================================================
    CLEAR STOP
+
    POST /api/v1/robots/:robotId/clear-stop
 ============================================================ */
 
 export const clearRobotStop =
   asyncHandler(
     async (req, res) => {
+
       const { robotId } =
         req.params;
 
@@ -511,4 +529,3 @@ export const clearRobotStop =
       });
     }
   );
-
