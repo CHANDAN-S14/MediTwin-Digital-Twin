@@ -1,200 +1,424 @@
-import { Server } from 'socket.io';
+import Robot from '../models/Robot.js';
+import ApiError from '../utils/ApiError.js';
+import asyncHandler from '../utils/asyncHandler.js';
 
-let io = null;
+import {
+  startCollection,
+  recallCollection,
+  stopCollection,
+  clearStopCollection,
+} from '../services/robotSimulator.js';
 
-export const EVENTS = {
-  ROBOT_STATUS: 'robot:status',
-  ROBOT_POSITION: 'robot:position',
+import { emitRobotStatus } from '../services/socketService.js';
 
-  WASTE_COLLECTED: 'waste:collected',
-  WASTE_DEPOSITED: 'waste:deposited',
+/**
+ * GET /api/v1/robots
+ */
+export const listRobots = asyncHandler(async (_req, res) => {
+  const robots = await Robot.find({})
+    .sort({ robotId: 1 })
+    .lean();
 
-  TASK_UPDATED: 'task:updated',
-  WASTE_UPDATED: 'waste:updated',
-
-  DIGITAL_TWIN_UPDATE: 'digitalTwin:update',
-};
-
-export function initializeSocket(server) {
-  io = new Server(server, {
-    cors: {
-      origin: true,
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      credentials: true,
-    },
-    transports: ['websocket', 'polling'],
+  res.status(200).json({
+    success: true,
+    data: robots,
   });
+});
 
-  io.on('connection', (socket) => {
-    console.log('🔌 Socket connected:', socket.id);
 
-    socket.on('digitalTwin:join', () => {
-      socket.join('digital-twin');
+/**
+ * GET /api/v1/robots/:robotId
+ */
+export const getRobot = asyncHandler(async (req, res) => {
+  const { robotId } = req.params;
 
-      console.log(
-        `🤖 ${socket.id} joined digital-twin`
-      );
-    });
+  const robot = await Robot.findOne({
+    robotId,
+  }).lean();
 
-    socket.on('join:hospital', (hospitalId) => {
-      if (!hospitalId) return;
-
-      const room = `hospital:${hospitalId}`;
-
-      socket.join(room);
-
-      console.log(
-        `🏥 ${socket.id} joined ${room}`
-      );
-    });
-
-    socket.on('disconnect', (reason) => {
-      console.log(
-        `🔌 Socket disconnected: ${socket.id}`,
-        reason
-      );
-    });
-  });
-
-  console.log('✅ Socket.IO initialized');
-
-  return io;
-}
-
-export function getIO() {
-  if (!io) {
-    throw new Error(
-      'Socket.IO has not been initialized'
+  if (!robot) {
+    throw ApiError.notFound(
+      `Robot ${robotId} not found`
     );
   }
 
-  return io;
-}
+  res.status(200).json({
+    success: true,
+    data: robot,
+  });
+});
 
-/* ============================================================
-   ROBOT STATUS
-============================================================ */
 
-export function emitRobotStatus(robotId, data) {
-  if (!io) {
-    console.warn('Socket.IO not initialized');
-    return;
+/**
+ * GET /api/v1/robots/:robotId/telemetry
+ */
+export const getTelemetry = asyncHandler(async (req, res) => {
+  const { robotId } = req.params;
+
+  const robot = await Robot.findOne({
+    robotId,
+  }).lean();
+
+  if (!robot) {
+    throw ApiError.notFound(
+      `Robot ${robotId} not found`
+    );
   }
 
-  const payload = {
-    robotId,
-    ...data,
-  };
+  res.status(200).json({
+    success: true,
+    data: {
+      robotId: robot.robotId,
 
-  console.log('🤖 Robot status:', payload);
+      status: robot.status,
 
-  io.emit(EVENTS.ROBOT_STATUS, payload);
-}
+      battery: Number(robot.battery ?? 0),
 
-/* ============================================================
-   ROBOT POSITION
-============================================================ */
+      location: robot.currentLocation,
 
-export function emitRobotPosition(robotId, position) {
-  if (!io) {
-    console.warn('Socket.IO not initialized');
-    return;
-  }
+      targetLocation: robot.targetLocation,
 
-  const payload = {
-    robotId,
+      targetBin: robot.targetBin,
 
-    position: {
-      x: Number(position?.x) || 0,
-      y: Number(position?.y) || 0,
-      z: Number(position?.z) || 0,
+      load: Number(robot.load ?? 0),
+
+      position: {
+        x: Number(robot.position?.x ?? 0),
+        y: Number(robot.position?.y ?? 0),
+        z: Number(robot.position?.z ?? 0),
+      },
+
+      lastActivity: robot.lastActivity,
     },
-  };
+  });
+});
 
-  console.log('📍 Robot position:', payload);
 
-  io.emit(EVENTS.ROBOT_POSITION, payload);
-}
+/**
+ * POST /api/v1/robots/:robotId/dispatch
+ *
+ * Example:
+ *
+ * POST
+ * /api/v1/robots/MEDI-001/dispatch
+ *
+ * Body:
+ *
+ * {
+ *   "department": "OT",
+ *   "expectedCategory": "yellow",
+ *   "confidence": 0.94,
+ *   "wasteId": "MW-0001"
+ * }
+ */
+export const dispatchRobot = asyncHandler(async (req, res) => {
+  const { robotId } = req.params;
 
-/* ============================================================
-   DIGITAL TWIN
-============================================================ */
+  const {
+    department = 'OT',
+    expectedCategory = 'general',
+    confidence = 1,
+    wasteId = null,
+  } = req.body || {};
 
-export function emitDigitalTwinUpdate(robotId, data) {
-  if (!io) {
-    console.warn('Socket.IO not initialized');
-    return;
+  console.log('🚀 Dispatch request:', {
+    robotId,
+    department,
+    expectedCategory,
+    confidence,
+    wasteId,
+  });
+
+
+  // --------------------------------------------------
+  // FIND ROBOT
+  // --------------------------------------------------
+
+  const robot = await Robot.findOne({
+    robotId,
+  });
+
+  if (!robot) {
+    throw ApiError.notFound(
+      `Robot ${robotId} not found`
+    );
   }
 
-  const payload = {
+
+  // --------------------------------------------------
+  // CHECK ROBOT STATUS
+  // --------------------------------------------------
+
+  if (robot.status !== 'IDLE') {
+    throw ApiError.conflict(
+      `Robot ${robotId} is currently ${robot.status}`
+    );
+  }
+
+
+  // --------------------------------------------------
+  // CHECK BATTERY
+  // --------------------------------------------------
+
+  if (Number(robot.battery ?? 0) <= 15) {
+    throw ApiError.conflict(
+      `Robot ${robotId} does not have enough battery`
+    );
+  }
+
+
+  // --------------------------------------------------
+  // VALIDATE DEPARTMENT
+  // --------------------------------------------------
+
+  const validDepartments = [
+    'OT',
+    'ICU',
+    'WARD',
+    'GENERAL',
+  ];
+
+  const selectedDepartment =
+    String(department || 'OT')
+      .trim()
+      .toUpperCase();
+
+  const finalDepartment =
+    validDepartments.includes(selectedDepartment)
+      ? selectedDepartment
+      : 'GENERAL';
+
+
+  // --------------------------------------------------
+  // VALIDATE WASTE CATEGORY
+  // --------------------------------------------------
+
+  const validCategories = [
+    'yellow',
+    'red',
+    'blue',
+    'general',
+  ];
+
+  const selectedCategory =
+    String(expectedCategory || 'general')
+      .trim()
+      .toLowerCase();
+
+  const finalCategory =
+    validCategories.includes(selectedCategory)
+      ? selectedCategory
+      : 'general';
+
+
+  // --------------------------------------------------
+  // NORMALIZE CONFIDENCE
+  // --------------------------------------------------
+
+  const finalConfidence =
+    Number.isFinite(Number(confidence))
+      ? Number(confidence)
+      : 1;
+
+
+  console.log('🤖 Starting robot simulation:', {
     robotId,
-    ...data,
-  };
+    department: finalDepartment,
+    category: finalCategory,
+    confidence: finalConfidence,
+  });
 
-  console.log('🎮 Digital Twin:', payload);
 
-  io.emit(
-    EVENTS.DIGITAL_TWIN_UPDATE,
-    payload
-  );
-}
+  // --------------------------------------------------
+  // START COLLECTION
+  // --------------------------------------------------
 
-/* ============================================================
-   WASTE COLLECTED
-============================================================ */
+  const task = await startCollection({
+    hospitalId: robot.hospitalId ?? null,
 
-export function emitWasteCollected(data) {
-  if (!io) return;
+    robotId: robot.robotId,
 
-  console.log('♻️ Waste collected:', data);
+    department: finalDepartment,
 
-  io.emit(
-    EVENTS.WASTE_COLLECTED,
-    data
-  );
-}
+    expectedCategory: finalCategory,
 
-/* ============================================================
-   WASTE DEPOSITED
-============================================================ */
+    confidence: finalConfidence,
 
-export function emitWasteDeposited(data) {
-  if (!io) return;
+    wasteId,
 
-  console.log('🗑️ Waste deposited:', data);
+    requestedBy: null,
+  });
 
-  io.emit(
-    EVENTS.WASTE_DEPOSITED,
-    data
-  );
-}
 
-/* ============================================================
-   TASK UPDATED
-============================================================ */
+  // --------------------------------------------------
+  // SEND INITIAL SOCKET STATUS
+  // --------------------------------------------------
 
-export function emitTaskUpdated(data) {
-  if (!io) return;
+  emitRobotStatus(robot.robotId, {
+    status: 'DISPATCHED',
 
-  console.log('📋 Task updated:', data);
+    currentLocation:
+      robot.currentLocation ||
+      'Charging Station',
 
-  io.emit(
-    EVENTS.TASK_UPDATED,
-    data
-  );
-}
+    targetLocation:
+      finalDepartment,
 
-/* ============================================================
-   WASTE UPDATED
-============================================================ */
+    targetBin:
+      finalCategory,
 
-export function emitWasteUpdated(data) {
-  if (!io) return;
+    lastActivity:
+      `Dispatched to ${finalDepartment}`,
+  });
 
-  console.log('♻️ Waste updated:', data);
 
-  io.emit(
-    EVENTS.WASTE_UPDATED,
-    data
-  );
-}
+  // --------------------------------------------------
+  // RESPONSE
+  // --------------------------------------------------
+
+  res.status(201).json({
+    success: true,
+
+    message:
+      `Robot ${robot.robotId} collection started`,
+
+    data: {
+      task,
+
+      robotId:
+        robot.robotId,
+
+      department:
+        finalDepartment,
+
+      expectedCategory:
+        finalCategory,
+
+      confidence:
+        finalConfidence,
+
+      wasteId,
+    },
+  });
+});
+
+
+/**
+ * POST /api/v1/robots/:robotId/recall
+ */
+export const recallRobot = asyncHandler(async (req, res) => {
+  const { robotId } = req.params;
+
+  const robot = await Robot.findOne({
+    robotId,
+  });
+
+  if (!robot) {
+    throw ApiError.notFound(
+      `Robot ${robotId} not found`
+    );
+  }
+
+  const result =
+    await recallCollection(robotId);
+
+  res.status(200).json({
+    success: true,
+
+    message:
+      'Robot recalled',
+
+    data:
+      result,
+  });
+});
+
+
+/**
+ * POST /api/v1/robots/:robotId/stop
+ */
+export const stopRobot = asyncHandler(async (req, res) => {
+  const { robotId } = req.params;
+
+  const robot = await Robot.findOne({
+    robotId,
+  });
+
+  if (!robot) {
+    throw ApiError.notFound(
+      `Robot ${robotId} not found`
+    );
+  }
+
+  const result =
+    await stopCollection(robotId);
+
+  emitRobotStatus(robotId, {
+    status: 'STOPPED',
+
+    reason:
+      'Manual emergency stop',
+
+    lastActivity:
+      'Emergency stop activated',
+  });
+
+  res.status(200).json({
+    success: true,
+
+    message:
+      'Robot stopped',
+
+    data:
+      result,
+  });
+});
+
+
+/**
+ * POST /api/v1/robots/:robotId/clear-stop
+ */
+export const clearRobotStop = asyncHandler(
+  async (req, res) => {
+    const { robotId } = req.params;
+
+    const robot = await Robot.findOne({
+      robotId,
+    });
+
+    if (!robot) {
+      throw ApiError.notFound(
+        `Robot ${robotId} not found`
+      );
+    }
+
+    const result =
+      await clearStopCollection(robotId);
+
+    emitRobotStatus(robotId, {
+      status: 'IDLE',
+
+      currentLocation:
+        'Charging Station',
+
+      targetLocation:
+        null,
+
+      targetBin:
+        null,
+
+      lastActivity:
+        'Stop cleared',
+    });
+
+    res.status(200).json({
+      success: true,
+
+      message:
+        'Robot stop cleared',
+
+      data:
+        result,
+    });
+  }
+);
