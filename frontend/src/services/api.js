@@ -440,25 +440,11 @@ export const robots = {
 /* ============================================================
    WASTE
 ============================================================ */
-
 /* ============================================================
    WASTE
 ============================================================ */
 
 export const waste = {
-  /*
-   * API_BASE already contains /api/v1
-   *
-   * Example:
-   * https://meditwin-digital-twin.onrender.com/api/v1
-   *
-   * Therefore use:
-   * /waste
-   *
-   * NOT:
-   * /api/v1/waste
-   */
-
   list: () => {
     return get("/waste");
   },
@@ -472,10 +458,7 @@ export const waste = {
   },
 
   updateCategory: (id, payload) => {
-    return patch(
-      `/waste/${id}/category`,
-      payload
-    );
+    return patch(`/waste/${id}/category`, payload);
   },
 
   delete: (id) => {
