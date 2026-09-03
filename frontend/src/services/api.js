@@ -441,29 +441,46 @@ export const robots = {
    WASTE
 ============================================================ */
 
+/* ============================================================
+   WASTE
+============================================================ */
+
 export const waste = {
-  list: () =>
-    apiRequest("/api/v1/waste"),
+  /*
+   * API_BASE already contains /api/v1
+   *
+   * Example:
+   * https://meditwin-digital-twin.onrender.com/api/v1
+   *
+   * Therefore use:
+   * /waste
+   *
+   * NOT:
+   * /api/v1/waste
+   */
 
-  create: (payload) =>
-    apiRequest("/api/v1/waste", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+  list: () => {
+    return get("/waste");
+  },
 
-  get: (id) =>
-    apiRequest(`/api/v1/waste/${id}`),
+  create: (payload) => {
+    return post("/waste", payload);
+  },
 
-  updateCategory: (id, payload) =>
-    apiRequest(`/api/v1/waste/${id}/category`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }),
+  get: (id) => {
+    return get(`/waste/${id}`);
+  },
 
-  delete: (id) =>
-    apiRequest(`/api/v1/waste/${id}`, {
-      method: "DELETE",
-    }),
+  updateCategory: (id, payload) => {
+    return patch(
+      `/waste/${id}/category`,
+      payload
+    );
+  },
+
+  delete: (id) => {
+    return del(`/waste/${id}`);
+  },
 };
 /* ============================================================
    AI
