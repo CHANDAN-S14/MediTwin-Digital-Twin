@@ -7,10 +7,7 @@ const SOCKET_URL =
 const socket = io(SOCKET_URL, {
   autoConnect: false,
 
-  transports: [
-    "websocket",
-    "polling",
-  ],
+  transports: ["websocket", "polling"],
 
   withCredentials: true,
 });
@@ -21,8 +18,10 @@ socket.on("connect", () => {
     socket.id
   );
 
-  socket.emit(
-    "digitalTwin:join"
+  socket.emit("digitalTwin:join");
+
+  console.log(
+    "📡 Joined digital-twin room"
   );
 });
 
@@ -40,8 +39,21 @@ socket.on("connect_error", (error) => {
   );
 });
 
+socket.onAny((event, data) => {
+  console.log(
+    "📨 SOCKET EVENT:",
+    event,
+    data
+  );
+});
+
 export function connectDigitalTwin() {
   if (!socket.connected) {
+    console.log(
+      "🔌 Connecting to:",
+      SOCKET_URL
+    );
+
     socket.connect();
   }
 }
