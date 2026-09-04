@@ -1,571 +1,723 @@
-import React, { useEffect, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import React, { useEffect, useMemo, useState } from 'react';
+import { Canvas } from '@react-three/fiber';
 import {
   OrbitControls,
-  Environment,
   Grid,
-  PerspectiveCamera,
-} from "@react-three/drei";
-import { useLocation, useNavigate } from "react-router-dom";
+  Text,
+  Float,
+} from '@react-three/drei';
 
-import RobotModel from "./Robotmodel";
+import socket, {
+  connectDigitalTwin,
+} from '../services/socket.js';
 
-const ROUTE = [
-  {
-    name: "Charging Station",
-    position: { x: 0, y: 0.8, z: 0 },
-    status: "READY",
-  },
-  {
-    name: "Waste Pickup",
-    position: { x: 5, y: 0.8, z: 0 },
-    status: "MOVING_TO_PICKUP",
-  },
-  {
-    name: "Waste Collected",
-    position: { x: 5, y: 0.8, z: 4 },
-    status: "COLLECTING",
-  },
-  {
-    name: "Correct Waste Bin",
-    position: { x: -5, y: 0.8, z: 4 },
-    status: "MOVING_TO_BIN",
-  },
-  {
-    name: "Waste Deposited",
-    position: { x: -5, y: 0.8, z: -4 },
-    status: "DEPOSITING",
-  },
-  {
-    name: "Charging Station",
-    position: { x: 0, y: 0.8, z: 0 },
-    status: "RETURNING",
-  },
-];
+const ROBOT_ID = 'MEDI-001';
 
-function Ground() {
+const BIN_CONFIG = {
+  yellow: {
+    label: 'YELLOW',
+    position: [-7, 0.75, -7],
+  },
+
+  red: {
+    label: 'RED',
+    position: [0, 0.75, -7],
+  },
+
+  blue: {
+    label: 'BLUE',
+    position: [7, 0.75, -7],
+  },
+
+  general: {
+    label: 'GENERAL',
+    position: [7, 0.75, 7],
+  },
+};
+
+const ROBOT_COLORS = {
+  IDLE: '#22c55e',
+  DISPATCHED: '#3b82f6',
+  MOVING_TO_PICKUP: '#3b82f6',
+  ARRIVED_AT_PICKUP: '#f59e0b',
+  COLLECTING: '#eab308',
+  MOVING_TO_BIN: '#a855f7',
+  DEPOSITING: '#ef4444',
+  RETURNING: '#06b6d4',
+  STOPPED: '#dc2626',
+};
+
+function Floor() {
   return (
-    <>
-      <Grid
-        args={[30, 30]}
-        cellSize={1}
-        cellThickness={0.5}
-        cellColor="#cbd5e1"
-        sectionSize={5}
-        sectionThickness={1}
-        sectionColor="#94a3b8"
-        fadeDistance={35}
-        fadeStrength={1}
-        infiniteGrid
-      />
-
+    <group>
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, -1.2, 0]}
-        receiveShadow
+        position={[0, -0.05, 0]}
       >
-        <planeGeometry args={[30, 30]} />
-        <meshStandardMaterial color="#f8fafc" />
-      </mesh>
-    </>
-  );
-}
-
-function LocationMarker({ position, color = "#22c55e", label }) {
-  return (
-    <group position={position}>
-      <mesh position={[0, 0.05, 0]}>
-        <cylinderGeometry args={[0.7, 0.7, 0.1, 32]} />
-        <meshStandardMaterial color={color} />
+        <planeGeometry args={[24, 24]} />
+        <meshStandardMaterial color="#e5e7eb" />
       </mesh>
 
-      <mesh position={[0, 0.7, 0]}>
-        <sphereGeometry args={[0.3, 20, 20]} />
-        <meshStandardMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={1}
-        />
-      </mesh>
-
-      <mesh position={[0, 1.2, 0]}>
-        <boxGeometry args={[1.5, 0.3, 0.1]} />
-        <meshStandardMaterial color="#ffffff" />
-      </mesh>
+      <Grid
+        args={[24, 24]}
+        cellSize={1}
+        cellThickness={0.4}
+        sectionSize={4}
+        sectionThickness={1}
+        fadeDistance={30}
+        infiniteGrid={false}
+      />
     </group>
   );
 }
 
+function ChargingStation() {
+  return (
+    <group position={[0, 0, 0]}>
+      <mesh position={[0, 0.15, 0]}>
+        <boxGeometry args={[3, 0.3, 2.5]} />
+        <meshStandardMaterial color="#374151" />
+      </mesh>
+
+      <mesh position={[0, 1.5, -1]}>
+        <boxGeometry args={[2.5, 3, 0.2]} />
+        <meshStandardMaterial color="#6b7280" />
+      </mesh>
+
+      <Text
+        position={[0, 3.3, -1]}
+        fontSize={0.45}
+        color="#111827"
+        anchorX="center"
+      >
+        CHARGING
+      </Text>
+    </group>
+  );
+}
+
+function Bin({ category, position }) {
+  const color =
+    category === 'yellow'
+      ? '#eab308'
+      : category === 'red'
+        ? '#ef4444'
+        : category === 'blue'
+          ? '#3b82f6'
+          : '#6b7280';
+
+  return (
+    <group position={position}>
+      <mesh>
+        <boxGeometry args={[2, 1.5, 2]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+
+      <mesh position={[0, 0.85, 0]}>
+        <boxGeometry args={[2.15, 0.15, 2.15]} />
+        <meshStandardMaterial color="#111827" />
+      </mesh>
+
+      <Text
+        position={[0, 1.8, 0]}
+        fontSize={0.38}
+        color="#111827"
+        anchorX="center"
+      >
+        {BIN_CONFIG[category].label}
+      </Text>
+    </group>
+  );
+}
+
+function Department({ name, position }) {
+  return (
+    <group position={position}>
+      <mesh>
+        <boxGeometry args={[2.8, 1.8, 2]} />
+        <meshStandardMaterial color="#cbd5e1" />
+      </mesh>
+
+      <Text
+        position={[0, 1.25, 1.05]}
+        fontSize={0.35}
+        color="#111827"
+        anchorX="center"
+      >
+        {name}
+      </Text>
+    </group>
+  );
+}
+
+function WasteObject({ visible, position }) {
+  if (!visible) return null;
+
+  return (
+    <Float
+      speed={3}
+      rotationIntensity={0.3}
+    >
+      <mesh position={position}>
+        <boxGeometry args={[0.6, 0.6, 0.6]} />
+        <meshStandardMaterial color="#f97316" />
+      </mesh>
+    </Float>
+  );
+}
+
+function Robot({ position, status }) {
+  const color =
+    ROBOT_COLORS[status] ||
+    ROBOT_COLORS.IDLE;
+
+  return (
+    <group
+      position={[
+        Number(position?.x) || 0,
+        0.6,
+        Number(position?.z) || 0,
+      ]}
+    >
+      {/* ROBOT BODY */}
+      <mesh>
+        <boxGeometry args={[1.2, 0.7, 1.4]} />
+
+        <meshStandardMaterial
+          color={color}
+          metalness={0.4}
+          roughness={0.3}
+        />
+      </mesh>
+
+      {/* TOP UNIT */}
+      <mesh position={[0, 0.55, 0]}>
+        <cylinderGeometry
+          args={[0.4, 0.4, 0.25, 24]}
+        />
+
+        <meshStandardMaterial color="#111827" />
+      </mesh>
+
+      {/* LEFT WHEEL */}
+      <mesh
+        rotation={[Math.PI / 2, 0, 0]}
+        position={[-0.65, -0.3, 0]}
+      >
+        <cylinderGeometry
+          args={[0.25, 0.25, 0.25, 20]}
+        />
+
+        <meshStandardMaterial color="#111827" />
+      </mesh>
+
+      {/* RIGHT WHEEL */}
+      <mesh
+        rotation={[Math.PI / 2, 0, 0]}
+        position={[0.65, -0.3, 0]}
+      >
+        <cylinderGeometry
+          args={[0.25, 0.25, 0.25, 20]}
+        />
+
+        <meshStandardMaterial color="#111827" />
+      </mesh>
+
+      {/* ROBOT ID */}
+      <Text
+        position={[0, 1.25, 0]}
+        fontSize={0.35}
+        color="#111827"
+        anchorX="center"
+      >
+        {ROBOT_ID}
+      </Text>
+    </group>
+  );
+}
+
+function Scene({
+  robot,
+  wasteVisible,
+  wastePosition,
+}) {
+  return (
+    <>
+      <ambientLight intensity={1.5} />
+
+      <directionalLight
+        position={[10, 15, 10]}
+        intensity={2}
+      />
+
+      <Floor />
+
+      <ChargingStation />
+
+      {/* DEPARTMENTS */}
+
+      <Department
+        name="OT"
+        position={[-7, 0.9, 3]}
+      />
+
+      <Department
+        name="ICU"
+        position={[-6, 0.9, -4]}
+      />
+
+      <Department
+        name="WARD"
+        position={[7, 0.9, -3]}
+      />
+
+      <Department
+        name="GENERAL"
+        position={[0, 0.9, 7]}
+      />
+
+      {/* WASTE BINS */}
+
+      <Bin
+        category="yellow"
+        position={BIN_CONFIG.yellow.position}
+      />
+
+      <Bin
+        category="red"
+        position={BIN_CONFIG.red.position}
+      />
+
+      <Bin
+        category="blue"
+        position={BIN_CONFIG.blue.position}
+      />
+
+      <Bin
+        category="general"
+        position={BIN_CONFIG.general.position}
+      />
+
+      {/* WASTE */}
+
+      <WasteObject
+        visible={wasteVisible}
+        position={wastePosition}
+      />
+
+      {/* ROBOT */}
+
+      <Robot
+        position={robot.position}
+        status={robot.status}
+      />
+
+      <OrbitControls />
+    </>
+  );
+}
+
 export default function DigitalTwin() {
-  const location = useLocation();
-  const navigate = useNavigate();
+  const [robot, setRobot] = useState({
+    robotId: ROBOT_ID,
 
-  const [task, setTask] = useState(null);
+    status: 'IDLE',
 
-  const [robotPosition, setRobotPosition] = useState({
-    x: 0,
-    y: 0.8,
-    z: 0,
+    position: {
+      x: 0,
+      y: 0,
+      z: 0,
+    },
+
+    currentLocation: 'Charging Station',
+
+    targetLocation: null,
+
+    targetBin: null,
+
+    lastActivity: 'Waiting for task',
   });
 
-  const [currentStep, setCurrentStep] = useState(0);
+  const [waste, setWaste] = useState({
+    visible: false,
 
-  const [simulationRunning, setSimulationRunning] = useState(false);
+    category: 'general',
 
-  const [status, setStatus] = useState("READY");
+    position: {
+      x: 0,
+      y: 0.5,
+      z: 0,
+    },
+  });
 
-  const [completed, setCompleted] = useState(false);
+  /*
+   * ============================================================
+   * SOCKET CONNECTION
+   * ============================================================
+   */
 
-  // ---------------------------------------------------------
-  // LOAD TASK
-  // ---------------------------------------------------------
+ useEffect(() => {
+  console.log("🌐 Digital Twin component mounted");
 
-  useEffect(() => {
-    let loadedTask = location.state?.task;
+  const handleStatus = (data) => {
+    console.log(
+      "🤖 ROBOT STATUS:",
+      data
+    );
 
-    if (!loadedTask) {
-      try {
-        const savedTask = sessionStorage.getItem(
-          "meditwin.digitalTwinTask"
-        );
-
-        if (savedTask) {
-          loadedTask = JSON.parse(savedTask);
-        }
-      } catch (error) {
-        console.error("Unable to load saved task:", error);
-      }
-    }
-
-    if (loadedTask) {
-      setTask(loadedTask);
-    }
-  }, [location.state]);
-
-  // ---------------------------------------------------------
-  // START SIMULATION
-  // ---------------------------------------------------------
-
-  const startSimulation = () => {
-    if (simulationRunning) return;
-
-    setSimulationRunning(true);
-    setCompleted(false);
-    setCurrentStep(0);
-    setStatus("DISPATCHED");
-
-    setRobotPosition({
-      x: ROUTE[0].position.x,
-      y: ROUTE[0].position.y,
-      z: ROUTE[0].position.z,
-    });
-  };
-
-  // ---------------------------------------------------------
-  // MOVE ROBOT THROUGH ROUTE
-  // ---------------------------------------------------------
-
-  useEffect(() => {
-    if (!simulationRunning) return;
-
-    if (currentStep >= ROUTE.length - 1) {
-      setStatus("COMPLETED");
-      setCompleted(true);
-      setSimulationRunning(false);
+    if (data?.robotId !== ROBOT_ID) {
       return;
     }
 
-    const timer = setTimeout(() => {
-      const nextStep = currentStep + 1;
+    setRobot((previous) => ({
+      ...previous,
+      ...data,
+      robotId: ROBOT_ID,
+    }));
 
-      setCurrentStep(nextStep);
+    if (
+      data.status === "ARRIVED_AT_PICKUP"
+    ) {
+      setWaste((previous) => ({
+        ...previous,
+        visible: true,
+      }));
+    }
 
-      setRobotPosition({
-        x: ROUTE[nextStep].position.x,
-        y: ROUTE[nextStep].position.y,
-        z: ROUTE[nextStep].position.z,
-      });
-
-      setStatus(ROUTE[nextStep].status);
-    }, 3000);
-
-    return () => clearTimeout(timer);
-  }, [simulationRunning, currentStep]);
-
-  // ---------------------------------------------------------
-  // RESET
-  // ---------------------------------------------------------
-
-  const resetSimulation = () => {
-    setSimulationRunning(false);
-    setCompleted(false);
-    setCurrentStep(0);
-    setStatus("READY");
-
-    setRobotPosition({
-      x: ROUTE[0].position.x,
-      y: ROUTE[0].position.y,
-      z: ROUTE[0].position.z,
-    });
+    if (
+      data.status === "COLLECTING"
+    ) {
+      setWaste((previous) => ({
+        ...previous,
+        visible: false,
+      }));
+    }
   };
 
-  // ---------------------------------------------------------
-  // CURRENT ROUTE
-  // ---------------------------------------------------------
+  const handlePosition = (data) => {
+    console.log(
+      "📍 ROBOT POSITION:",
+      data
+    );
 
-  const currentLocation = ROUTE[currentStep];
+    if (data?.robotId !== ROBOT_ID) {
+      return;
+    }
 
-  // ---------------------------------------------------------
-  // UI
-  // ---------------------------------------------------------
+    if (!data?.position) {
+      return;
+    }
+
+    setRobot((previous) => ({
+      ...previous,
+
+      position: {
+        x: Number(data.position.x) || 0,
+        y: Number(data.position.y) || 0,
+        z: Number(data.position.z) || 0,
+      },
+    }));
+  };
+
+  const handleWasteCollected = (data) => {
+    console.log(
+      "♻️ WASTE COLLECTED:",
+      data
+    );
+
+    if (data?.robotId !== ROBOT_ID) {
+      return;
+    }
+
+    setWaste((previous) => ({
+      ...previous,
+      visible: false,
+    }));
+  };
+
+  const handleWasteDeposited = (data) => {
+    console.log(
+      "🗑️ WASTE DEPOSITED:",
+      data
+    );
+
+    if (data?.robotId !== ROBOT_ID) {
+      return;
+    }
+
+    setWaste((previous) => ({
+      ...previous,
+      visible: false,
+    }));
+  };
+
+  // REGISTER LISTENERS FIRST
+
+  socket.on(
+    "robot:status",
+    handleStatus
+  );
+
+  socket.on(
+    "robot:position",
+    handlePosition
+  );
+
+  socket.on(
+    "waste:collected",
+    handleWasteCollected
+  );
+
+  socket.on(
+    "waste:deposited",
+    handleWasteDeposited
+  );
+
+  // CONNECT AFTER LISTENERS ARE READY
+
+  connectDigitalTwin();
+
+  return () => {
+    console.log(
+      "🔌 Cleaning Digital Twin socket listeners"
+    );
+
+    socket.off(
+      "robot:status",
+      handleStatus
+    );
+
+    socket.off(
+      "robot:position",
+      handlePosition
+    );
+
+    socket.off(
+      "waste:collected",
+      handleWasteCollected
+    );
+
+    socket.off(
+      "waste:deposited",
+      handleWasteDeposited
+    );
+  };
+}, []);
+
+  /*
+   * ============================================================
+   * WASTE POSITION
+   * ============================================================
+   */
+
+  const wastePosition = useMemo(() => {
+    const target =
+      robot.targetLocation;
+
+    /*
+     * Backend may return:
+     * "OT"
+     * "ICU"
+     * "WARD"
+     * "GENERAL"
+     */
+
+    if (
+      target === 'OT' ||
+      target === 'Moving to OT'
+    ) {
+      return [-7, 0.6, 3];
+    }
+
+    if (
+      target === 'ICU' ||
+      target === 'Moving to ICU'
+    ) {
+      return [-6, 0.6, -4];
+    }
+
+    if (
+      target === 'WARD' ||
+      target === 'Moving to WARD'
+    ) {
+      return [7, 0.6, -3];
+    }
+
+    return [0, 0.6, 7];
+  }, [
+    robot.targetLocation,
+  ]);
+
+  /*
+   * ============================================================
+   * UI
+   * ============================================================
+   */
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
+    <div className="w-full h-screen bg-slate-950 text-white">
 
-      {/* HEADER */}
+      {/* TOP INFORMATION */}
 
-      <div className="border-b border-slate-800 bg-slate-900 px-6 py-5">
+      <div
+        className="
+          absolute
+          z-10
+          top-[100px]
+          left-4
+          right-4
+          gap-6
+          flex
+          justify-center
+          pointer-events-none
+        "
+      >
 
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        {/* ROBOT STATUS */}
 
-          <div>
-            <div className="flex items-center gap-3">
+        <div
+          className="
+            bg-white/95
+            text-slate-900
+            rounded-xl
+            px-5
+            py-4
+            shadow-xl
+            pointer-events-auto
+          "
+        >
 
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/20 text-2xl">
-                🤖
-              </div>
+          <h1 className="text-xl font-bold">
+            MediTwin Digital Twin
+          </h1>
 
-              <div>
+          <p className="text-sm mt-1">
+            Robot:{' '}
+            <b>
+              {robot.robotId}
+            </b>
+          </p>
 
-                <h1 className="text-2xl font-bold">
-                  MEDI-TWIN Digital Twin
-                </h1>
+          <p className="text-sm">
+            Status:{' '}
 
-                <p className="text-sm text-slate-400">
-                  Biomedical Waste Robot Simulation
-                </p>
-
-              </div>
-
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-
-            <button
-              onClick={() => navigate("/scanner")}
-              className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
+            <b
+              style={{
+                color:
+                  ROBOT_COLORS[
+                    robot.status
+                  ] ||
+                  '#111827',
+              }}
             >
-              ← Scanner
-            </button>
+              {robot.status}
+            </b>
+          </p>
 
-            <button
-              onClick={resetSimulation}
-              className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
-            >
-              Reset
-            </button>
+          <p className="text-sm">
+            Activity:{' '}
+            {robot.lastActivity ||
+              'Waiting for task'}
+          </p>
 
-          </div>
+          {robot.targetLocation && (
+            <p className="text-sm">
+              Target:{' '}
+              <b>
+                {robot.targetLocation}
+              </b>
+            </p>
+          )}
 
+          {robot.targetBin && (
+            <p className="text-sm">
+              Target bin:{' '}
+
+              <b>
+                {String(
+                  robot.targetBin
+                ).toUpperCase()}
+              </b>
+            </p>
+          )}
         </div>
 
-      </div>
+        {/* ROBOT STATES */}
 
-      {/* MAIN */}
+        <div
+          className="
+            bg-white/95
+            text-slate-900
+            rounded-xl
+            px-5
+            py-4
+            shadow-xl
+            pointer-events-auto
+          "
+        >
+          <p className="font-semibold mb-2">
+            Robot states
+          </p>
 
-      <div className="mx-auto max-w-7xl p-6">
+          <div
+            className="
+              grid
+              grid-cols-2
+              gap-x-4
+              gap-y-1
+              text-xs
+            "
+          >
+            <span>
+              🟢 IDLE
+            </span>
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+            <span>
+              🔵 MOVING
+            </span>
 
-          {/* 3D VIEW */}
+            <span>
+              🟡 COLLECTING
+            </span>
 
-          <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl">
+            <span>
+              🟣 TO BIN
+            </span>
 
-            <div className="border-b border-slate-800 px-5 py-4">
+            <span>
+              🔴 DEPOSITING
+            </span>
 
-              <div className="flex items-center justify-between">
-
-                <div>
-
-                  <h2 className="font-bold">
-                    Robot Simulation
-                  </h2>
-
-                  <p className="text-xs text-slate-400">
-                    Click Start Collection to move the robot
-                  </p>
-
-                </div>
-
-                <div className="flex items-center gap-2">
-
-                  <span
-                    className={`h-3 w-3 rounded-full ${
-                      simulationRunning
-                        ? "animate-pulse bg-emerald-400"
-                        : completed
-                        ? "bg-blue-400"
-                        : "bg-slate-500"
-                    }`}
-                  />
-
-                  <span className="text-xs font-semibold">
-                    {status}
-                  </span>
-
-                </div>
-
-              </div>
-
-            </div>
-
-            <div className="h-[600px]">
-
-              <Canvas shadows>
-
-                <PerspectiveCamera
-                  makeDefault
-                  position={[12, 10, 14]}
-                  fov={45}
-                />
-
-                <ambientLight intensity={1.5} />
-
-                <directionalLight
-                  position={[10, 15, 10]}
-                  intensity={3}
-                  castShadow
-                />
-
-                <Environment preset="city" />
-
-                <Ground />
-
-                {/* CHARGING STATION */}
-
-                <LocationMarker
-                  position={[0, 0, 0]}
-                  color="#22c55e"
-                  label="Charging"
-                />
-
-                {/* WASTE PICKUP */}
-
-                <LocationMarker
-                  position={[5, 0, 0]}
-                  color="#f59e0b"
-                  label="Waste"
-                />
-
-                {/* BIN */}
-
-                <LocationMarker
-                  position={[-5, 0, 4]}
-                  color="#ef4444"
-                  label="Bin"
-                />
-
-                {/* ROBOT */}
-
-                <RobotModel
-                  targetPosition={robotPosition}
-                />
-
-                <OrbitControls
-                  enablePan
-                  enableZoom
-                  enableRotate
-                  target={[0, 0, 0]}
-                />
-
-              </Canvas>
-
-            </div>
-
+            <span>
+              🔷 RETURNING
+            </span>
           </div>
-
-          {/* SIDE PANEL */}
-
-          <div className="space-y-5">
-
-            {/* TASK */}
-
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-
-              <h2 className="mb-4 text-lg font-bold">
-                Collection Task
-              </h2>
-
-              <div className="space-y-3 text-sm">
-
-                <div className="flex justify-between">
-                  <span className="text-slate-400">
-                    Robot
-                  </span>
-
-                  <span className="font-semibold">
-                    {task?.robotId || "MEDI-001"}
-                  </span>
-                </div>
-
-                <div className="flex justify-between">
-                  <span className="text-slate-400">
-                    Department
-                  </span>
-
-                  <span className="font-semibold">
-                    {task?.department || "OT"}
-                  </span>
-                </div>
-
-                <div className="flex justify-between">
-                  <span className="text-slate-400">
-                    Waste Category
-                  </span>
-
-                  <span className="font-semibold uppercase">
-                    {task?.wasteCategory || "General"}
-                  </span>
-                </div>
-
-                <div className="flex justify-between">
-                  <span className="text-slate-400">
-                    Weight
-                  </span>
-
-                  <span className="font-semibold">
-                    {task?.weight || 0} kg
-                  </span>
-                </div>
-
-              </div>
-
-            </div>
-
-            {/* CURRENT LOCATION */}
-
-            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-5">
-
-              <p className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                Robot Location
-              </p>
-
-              <h3 className="mt-2 text-xl font-bold">
-                {currentLocation.name}
-              </h3>
-
-              <p className="mt-1 text-sm text-slate-400">
-                X: {robotPosition.x.toFixed(1)}
-                {"  "}
-                Z: {robotPosition.z.toFixed(1)}
-              </p>
-
-            </div>
-
-            {/* PROGRESS */}
-
-            <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-
-              <h2 className="mb-4 font-bold">
-                Collection Progress
-              </h2>
-
-              <div className="space-y-4">
-
-                {ROUTE.map((step, index) => {
-
-                  const isCurrent =
-                    index === currentStep;
-
-                  const isCompleted =
-                    index < currentStep ||
-                    completed;
-
-                  return (
-                    <div
-                      key={`${step.name}-${index}`}
-                      className="flex items-center gap-3"
-                    >
-
-                      <div
-                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
-                          isCompleted
-                            ? "bg-emerald-500 text-white"
-                            : isCurrent
-                            ? "bg-blue-500 text-white"
-                            : "bg-slate-800 text-slate-500"
-                        }`}
-                      >
-                        {isCompleted
-                          ? "✓"
-                          : index + 1}
-                      </div>
-
-                      <div>
-
-                        <p
-                          className={`text-sm font-semibold ${
-                            isCurrent
-                              ? "text-white"
-                              : isCompleted
-                              ? "text-emerald-400"
-                              : "text-slate-500"
-                          }`}
-                        >
-                          {step.name}
-                        </p>
-
-                        <p className="text-xs text-slate-500">
-                          {step.status}
-                        </p>
-
-                      </div>
-
-                    </div>
-                  );
-                })}
-
-              </div>
-
-            </div>
-
-            {/* START BUTTON */}
-
-            {!completed ? (
-              <button
-                onClick={startSimulation}
-                disabled={simulationRunning}
-                className="w-full rounded-xl bg-emerald-600 px-5 py-4 text-lg font-bold shadow-lg transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {simulationRunning
-                  ? "🤖 Robot Collecting..."
-                  : "🚀 Start Waste Collection"}
-              </button>
-            ) : (
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-center">
-
-                <div className="text-3xl">
-                  ✅
-                </div>
-
-                <p className="mt-2 font-bold text-emerald-400">
-                  Collection Completed
-                </p>
-
-                <p className="mt-1 text-xs text-slate-400">
-                  Waste has been deposited in the correct bin.
-                </p>
-
-              </div>
-            )}
-
-          </div>
-
         </div>
-
       </div>
 
+      {/* THREE.JS */}
+
+      <Canvas
+        camera={{
+          position: [
+            16,
+            14,
+            16,
+          ],
+
+          fov: 45,
+        }}
+      >
+        <Scene
+          robot={robot}
+          wasteVisible={
+            waste.visible
+          }
+          wastePosition={
+            wastePosition
+          }
+        />
+      </Canvas>
     </div>
   );
 }
