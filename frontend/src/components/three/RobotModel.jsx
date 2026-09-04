@@ -4,13 +4,9 @@ import React, {
   useState,
 } from "react";
 
-import {
-  useFrame,
-} from "@react-three/fiber";
+import { useFrame } from "@react-three/fiber";
 
-import {
-  RoundedBox,
-} from "@react-three/drei";
+import { RoundedBox } from "@react-three/drei";
 
 import socket, {
   connectDigitalTwin,
@@ -18,9 +14,29 @@ import socket, {
 } from "../../services/socket";
 
 
+// ============================================================
+// DEFAULT ROBOT
+// ============================================================
+
+const DEFAULT_ROBOT_ID = "MEDI-001";
+
+
+// ============================================================
+// WHEEL
+// ============================================================
+
 function Wheel({ position }) {
+  const wheelRef = useRef(null);
+
+  useFrame((_, delta) => {
+    if (wheelRef.current) {
+      wheelRef.current.rotation.z -= delta * 8;
+    }
+  });
+
   return (
     <mesh
+      ref={wheelRef}
       position={position}
       rotation={[
         Math.PI / 2,
@@ -47,11 +63,22 @@ function Wheel({ position }) {
 }
 
 
-function RobotModel() {
+// ============================================================
+// ROBOT MODEL
+// ============================================================
 
+function RobotModel({
+  robotId = DEFAULT_ROBOT_ID,
+  autoMove = true,
+}) {
   const robotRef = useRef(null);
 
   const lightRef = useRef(null);
+
+  const movementRef = useRef({
+    active: false,
+    startTime: 0,
+  });
 
   const [targetPosition, setTargetPosition] =
     useState({
@@ -61,50 +88,141 @@ function RobotModel() {
     });
 
 
-  /* ============================================================
-     SOCKET CONNECTION
-  ============================================================ */
+  // ==========================================================
+  // ROBOT ROUTE
+  // ==========================================================
+
+  /*
+   * Demo route:
+   *
+   * Station
+   *    ↓
+   * Pickup location
+   *    ↓
+   * Correct waste bin
+   *    ↓
+   * Return to station
+   *
+   * You can change these coordinates according
+   * to your Digital Twin scene.
+   */
+
+  const route = [
+    {
+      x: 0,
+      y: 0.8,
+      z: 0,
+    },
+
+    {
+      x: 5,
+      y: 0.8,
+      z: 0,
+    },
+
+    {
+      x: 5,
+      y: 0.8,
+      z: 5,
+    },
+
+    {
+      x: -4,
+      y: 0.8,
+      z: 5,
+    },
+
+    {
+      x: -4,
+      y: 0.8,
+      z: 0,
+    },
+
+    {
+      x: 0,
+      y: 0.8,
+      z: 0,
+    },
+  ];
+
+
+  // ==========================================================
+  // SOCKET CONNECTION
+  // ==========================================================
 
   useEffect(() => {
-
     connectDigitalTwin();
 
+    // --------------------------------------------------------
+    // RECEIVE ROBOT POSITION
+    // --------------------------------------------------------
 
     const handlePosition = (data) => {
-
       console.log(
-        "📍 FRONTEND ROBOT POSITION:",
+        "📍 ROBOT POSITION EVENT:",
         data
       );
 
+      /*
+       * Accept the configured robot ID.
+       *
+       * If backend doesn't send robotId,
+       * still accept the position event.
+       */
 
-      // Only control MEDI-001
       if (
-        data?.robotId !== "MEDI-001"
+        data?.robotId &&
+        String(data.robotId) !== String(robotId)
       ) {
         return;
       }
-
 
       if (!data?.position) {
         return;
       }
 
+      const x = Number(data.position.x);
+      const y = Number(data.position.y);
+      const z = Number(data.position.z);
+
+      if (
+        !Number.isFinite(x) ||
+        !Number.isFinite(z)
+      ) {
+        return;
+      }
 
       setTargetPosition({
-        x: Number(
-          data.position.x
-        ) || 0,
-
-        y:
-          Number(
-            data.position.y
-          ) || 0.8,
-
-        z: Number(
-          data.position.z
-        ) || 0,
+        x,
+        y: Number.isFinite(y) ? y : 0.8,
+        z,
       });
+
+      // Backend is controlling movement
+      movementRef.current.active = false;
+    };
+
+
+    // --------------------------------------------------------
+    // COMMON ROBOT EVENTS
+    // --------------------------------------------------------
+
+    const handleRobotUpdate = (data) => {
+      console.log(
+        "🤖 ROBOT UPDATE:",
+        data
+      );
+
+      if (
+        data?.robotId &&
+        String(data.robotId) !== String(robotId)
+      ) {
+        return;
+      }
+
+      if (data?.position) {
+        handlePosition(data);
+      }
     };
 
 
@@ -113,46 +231,201 @@ function RobotModel() {
       handlePosition
     );
 
+    socket.on(
+      "robot-position",
+      handlePosition
+    );
+
+    socket.on(
+      "robot:position:update",
+      handlePosition
+    );
+
+    socket.on(
+      "robot:update",
+      handleRobotUpdate
+    );
+
+    socket.on(
+      "robot:status",
+      handleRobotUpdate
+    );
+
+
+    // --------------------------------------------------------
+    // START AUTO DEMO MOVEMENT
+    // --------------------------------------------------------
+
+    if (autoMove) {
+      movementRef.current.active = true;
+      movementRef.current.startTime =
+        performance.now();
+    }
+
+
+    // --------------------------------------------------------
+    // CLEANUP
+    // --------------------------------------------------------
 
     return () => {
-
       socket.off(
         "robot:position",
         handlePosition
       );
 
+      socket.off(
+        "robot-position",
+        handlePosition
+      );
+
+      socket.off(
+        "robot:position:update",
+        handlePosition
+      );
+
+      socket.off(
+        "robot:update",
+        handleRobotUpdate
+      );
+
+      socket.off(
+        "robot:status",
+        handleRobotUpdate
+      );
+
       disconnectDigitalTwin();
-
     };
+  }, [robotId, autoMove]);
 
-  }, []);
 
-
-  /* ============================================================
-     SMOOTH ROBOT MOVEMENT
-  ============================================================ */
+  // ==========================================================
+  // MOVEMENT
+  // ==========================================================
 
   useFrame((state, delta) => {
-
     if (!robotRef.current) {
       return;
     }
 
-
-    const robot =
-      robotRef.current;
+    const robot = robotRef.current;
 
 
-    // Smooth movement
+    // ========================================================
+    // AUTO DEMO MOVEMENT
+    // ========================================================
+
+    if (
+      autoMove &&
+      movementRef.current.active
+    ) {
+      const elapsed =
+        (performance.now() -
+          movementRef.current.startTime) /
+        1000;
+
+
+      /*
+       * Time spent at each route point.
+       *
+       * Increase this value for slower movement.
+       */
+
+      const segmentDuration = 3;
+
+
+      const totalSegments =
+        route.length - 1;
+
+
+      const totalDuration =
+        totalSegments *
+        segmentDuration;
+
+
+      /*
+       * Loop the route continuously.
+       */
+
+      const currentTime =
+        elapsed % totalDuration;
+
+
+      const segmentFloat =
+        currentTime /
+        segmentDuration;
+
+
+      const segmentIndex =
+        Math.floor(segmentFloat);
+
+
+      const progress =
+        segmentFloat -
+        segmentIndex;
+
+
+      const start =
+        route[segmentIndex];
+
+
+      const end =
+        route[
+          Math.min(
+            segmentIndex + 1,
+            route.length - 1
+          )
+        ];
+
+
+      // ------------------------------------------------------
+      // INTERPOLATE X
+      // ------------------------------------------------------
+
+      const x =
+        start.x +
+        (end.x - start.x) *
+          progress;
+
+
+      // ------------------------------------------------------
+      // INTERPOLATE Z
+      // ------------------------------------------------------
+
+      const z =
+        start.z +
+        (end.z - start.z) *
+          progress;
+
+
+      // ------------------------------------------------------
+      // UPDATE TARGET
+      // ------------------------------------------------------
+
+      setTargetPosition({
+        x,
+        y: 0.8,
+        z,
+      });
+    }
+
+
+    // ========================================================
+    // SMOOTH MOVEMENT
+    // ========================================================
+
+    const movementSpeed =
+      Math.min(
+        delta * 4,
+        1
+      );
+
+
     robot.position.x +=
       (
         targetPosition.x -
         robot.position.x
       ) *
-      Math.min(
-        delta * 5,
-        1
-      );
+      movementSpeed;
 
 
     robot.position.z +=
@@ -160,38 +433,99 @@ function RobotModel() {
         targetPosition.z -
         robot.position.z
       ) *
-      Math.min(
-        delta * 5,
-        1
-      );
+      movementSpeed;
 
 
-    // Keep robot slightly floating
+    // ========================================================
+    // FLOATING EFFECT
+    // ========================================================
+
     robot.position.y =
       targetPosition.y +
       Math.sin(
         state.clock.getElapsedTime() *
-        1.5
+          2
       ) *
       0.03;
 
 
-    // Status light animation
-    if (lightRef.current) {
+    // ========================================================
+    // ROBOT ROTATION
+    // ========================================================
 
+    const dx =
+      targetPosition.x -
+      robot.position.x;
+
+    const dz =
+      targetPosition.z -
+      robot.position.z;
+
+
+    if (
+      Math.abs(dx) +
+        Math.abs(dz) >
+      0.01
+    ) {
+      const targetRotation =
+        Math.atan2(
+          dx,
+          dz
+        );
+
+
+      let rotationDifference =
+        targetRotation -
+        robot.rotation.y;
+
+
+      while (
+        rotationDifference >
+        Math.PI
+      ) {
+        rotationDifference -=
+          Math.PI * 2;
+      }
+
+
+      while (
+        rotationDifference <
+        -Math.PI
+      ) {
+        rotationDifference +=
+          Math.PI * 2;
+      }
+
+
+      robot.rotation.y +=
+        rotationDifference *
+        Math.min(
+          delta * 5,
+          1
+        );
+    }
+
+
+    // ========================================================
+    // STATUS LIGHT
+    // ========================================================
+
+    if (lightRef.current) {
       lightRef.current.intensity =
         2 +
         Math.sin(
           state.clock.getElapsedTime() *
-          5
+            5
         );
     }
-
   });
 
 
-  return (
+  // ==========================================================
+  // ROBOT UI
+  // ==========================================================
 
+  return (
     <group
       ref={robotRef}
       position={[
@@ -201,9 +535,9 @@ function RobotModel() {
       ]}
     >
 
-      {/* =====================================================
+      {/* ====================================================
           MAIN BODY
-      ===================================================== */}
+      ==================================================== */}
 
       <RoundedBox
         args={[
@@ -216,19 +550,17 @@ function RobotModel() {
         castShadow
         receiveShadow
       >
-
         <meshStandardMaterial
           color="#e2e8f0"
           metalness={0.25}
           roughness={0.35}
         />
-
       </RoundedBox>
 
 
-      {/* =====================================================
+      {/* ====================================================
           TOP UNIT
-      ===================================================== */}
+      ==================================================== */}
 
       <RoundedBox
         args={[
@@ -245,19 +577,17 @@ function RobotModel() {
         ]}
         castShadow
       >
-
         <meshStandardMaterial
           color="#f8fafc"
           metalness={0.15}
           roughness={0.3}
         />
-
       </RoundedBox>
 
 
-      {/* =====================================================
+      {/* ====================================================
           CAMERA
-      ===================================================== */}
+      ==================================================== */}
 
       <mesh
         position={[
@@ -266,7 +596,6 @@ function RobotModel() {
           0.78,
         ]}
       >
-
         <cylinderGeometry
           args={[
             0.25,
@@ -281,7 +610,6 @@ function RobotModel() {
           metalness={0.8}
           roughness={0.2}
         />
-
       </mesh>
 
 
@@ -292,7 +620,6 @@ function RobotModel() {
           0.88,
         ]}
       >
-
         <sphereGeometry
           args={[
             0.12,
@@ -306,13 +633,12 @@ function RobotModel() {
           emissive="#0284c7"
           emissiveIntensity={2}
         />
-
       </mesh>
 
 
-      {/* =====================================================
+      {/* ====================================================
           STATUS LIGHT
-      ===================================================== */}
+      ==================================================== */}
 
       <pointLight
         ref={lightRef}
@@ -334,7 +660,6 @@ function RobotModel() {
           0,
         ]}
       >
-
         <sphereGeometry
           args={[
             0.09,
@@ -348,13 +673,12 @@ function RobotModel() {
           emissive="#16a34a"
           emissiveIntensity={3}
         />
-
       </mesh>
 
 
-      {/* =====================================================
+      {/* ====================================================
           WASTE COMPARTMENTS
-      ===================================================== */}
+      ==================================================== */}
 
       <mesh
         position={[
@@ -363,7 +687,6 @@ function RobotModel() {
           1.12,
         ]}
       >
-
         <boxGeometry
           args={[
             1.2,
@@ -377,7 +700,6 @@ function RobotModel() {
           metalness={0.3}
           roughness={0.3}
         />
-
       </mesh>
 
 
@@ -388,7 +710,6 @@ function RobotModel() {
           1.12,
         ]}
       >
-
         <boxGeometry
           args={[
             1.2,
@@ -402,13 +723,12 @@ function RobotModel() {
           metalness={0.3}
           roughness={0.3}
         />
-
       </mesh>
 
 
-      {/* =====================================================
+      {/* ====================================================
           WHEELS
-      ===================================================== */}
+      ==================================================== */}
 
       <Wheel
         position={[
@@ -443,9 +763,9 @@ function RobotModel() {
       />
 
 
-      {/* =====================================================
+      {/* ====================================================
           FRONT SENSOR
-      ===================================================== */}
+      ==================================================== */}
 
       <mesh
         position={[
@@ -454,7 +774,6 @@ function RobotModel() {
           1.15,
         ]}
       >
-
         <boxGeometry
           args={[
             1.5,
@@ -467,7 +786,6 @@ function RobotModel() {
           color="#334155"
           metalness={0.7}
         />
-
       </mesh>
 
     </group>
