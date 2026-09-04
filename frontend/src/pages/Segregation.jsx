@@ -35,6 +35,12 @@ const bins = [
     capacity: 35,
     weight: "12.4 kg",
   },
+    {
+    name: "GENERAL",
+    description: "Plastic And Fruit Waste",
+    capacity: 40,
+    weight: "14.8 kg",
+  },
 ];
 
 function Segregation() {
