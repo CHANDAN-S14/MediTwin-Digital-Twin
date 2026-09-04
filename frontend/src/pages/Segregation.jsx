@@ -23,12 +23,12 @@ const bins = [
     capacity: 61,
     weight: "30.5 kg",
   },
-  {
-    name: "WHITE",
-    description: "Sharps and metallic waste",
-    capacity: 47,
-    weight: "18.7 kg",
-  },
+  // {
+  //   name: "WHITE",
+  //   description: "Sharps and metallic waste",
+  //   capacity: 47,
+  //   weight: "18.7 kg",
+  // },
   {
     name: "BLUE",
     description: "Glassware and metallic implants",
