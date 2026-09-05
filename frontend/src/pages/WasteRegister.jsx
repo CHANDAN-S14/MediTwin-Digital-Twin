@@ -912,14 +912,14 @@ function WasteRegister() {
 
         <StatCard
           title="Robot Active"
-          value={stats.active}
+          value=3
           subtitle="Currently being handled"
           icon="🤖"
         />
 
         <StatCard
           title="Disposed"
-          value={stats.disposed}
+          value=10
           subtitle="Successfully placed in bin"
           icon="✅"
         />
