@@ -1,180 +1,133 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { waste as wasteApi } from "../services/api.js";
-import socket from "../services/socket";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import wasteApi from "../services/api";
+import socket, {
+  connectDigitalTwin,
+  disconnectDigitalTwin,
+} from "../services/socket";
 
 
+/* ============================================================
+   HELPERS
+============================================================ */
 
+const normalizeCategory = (value) => {
+  const v = String(value || "")
+    .trim()
+    .toLowerCase();
 
-const REFRESH_INTERVAL = 3000;
-
-const STATUS_CONFIG = {
-  PENDING: {
-    label: "Pending",
-    className: "bg-yellow-100 text-yellow-700 border-yellow-200",
-  },
-
-  CONFIRMED: {
-    label: "Confirmed",
-    className: "bg-blue-100 text-blue-700 border-blue-200",
-  },
-
-  DISPATCHED: {
-    label: "Robot Dispatched",
-    className: "bg-indigo-100 text-indigo-700 border-indigo-200",
-  },
-
-  MOVING_TO_PICKUP: {
-    label: "Robot Going to Pickup",
-    className: "bg-cyan-100 text-cyan-700 border-cyan-200",
-  },
-
-  ARRIVED_AT_PICKUP: {
-    label: "Robot Arrived",
-    className: "bg-sky-100 text-sky-700 border-sky-200",
-  },
-
-  COLLECTING: {
-    label: "Collecting",
-    className: "bg-orange-100 text-orange-700 border-orange-200",
-  },
-
-  MOVING_TO_BIN: {
-    label: "Moving to Bin",
-    className: "bg-purple-100 text-purple-700 border-purple-200",
-  },
-
-  DEPOSITING: {
-    label: "Depositing",
-    className: "bg-violet-100 text-violet-700 border-violet-200",
-  },
-
-  COLLECTED: {
-    label: "Collected",
-    className: "bg-green-100 text-green-700 border-green-200",
-  },
-
-  DISPOSED: {
-    label: "Disposed",
-    className: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  },
-
-  RETURNING: {
-    label: "Robot Returning",
-    className: "bg-slate-100 text-slate-700 border-slate-200",
-  },
-
-  COMPLETED: {
-    label: "Completed",
-    className: "bg-green-100 text-green-700 border-green-200",
-  },
-
-  CANCELLED: {
-    label: "Cancelled",
-    className: "bg-red-100 text-red-700 border-red-200",
-  },
-
-  FAILED: {
-    label: "Failed",
-    className: "bg-red-100 text-red-700 border-red-200",
-  },
-};
-
-const BIN_CONFIG = {
-  yellow: {
-    label: "Yellow Bin",
-    className: "bg-yellow-100 text-yellow-800 border-yellow-300",
-    icon: "🟡",
-  },
-
-  red: {
-    label: "Red Bin",
-    className: "bg-red-100 text-red-800 border-red-300",
-    icon: "🔴",
-  },
-
-  blue: {
-    label: "Blue Bin",
-    className: "bg-blue-100 text-blue-800 border-blue-300",
-    icon: "🔵",
-  },
-
-  general: {
-    label: "General Bin",
-    className: "bg-slate-100 text-slate-800 border-slate-300",
-    icon: "⚪",
-  },
-};
-
-function normalizeCategory(category) {
-  if (!category) return "general";
-
-  const value = String(category).toLowerCase().trim();
-
-  if (value.includes("yellow")) return "yellow";
-  if (value.includes("red")) return "red";
-  if (value.includes("blue")) return "blue";
-
+  if (v.includes("yellow")) return "yellow";
+  if (v.includes("red")) return "red";
+  if (v.includes("blue")) return "blue";
   if (
-    value.includes("general") ||
-    value.includes("non") ||
-    value.includes("municipal")
+    v.includes("general") ||
+    v.includes("non") ||
+    v.includes("municipal")
   ) {
     return "general";
   }
 
-  return value;
-}
+  return v || "general";
+};
 
-function getWasteStatus(item) {
+
+const normalizeStatus = (value) => {
+  return String(value || "pending")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+};
+
+
+const formatStatus = (status) => {
+  const value = normalizeStatus(status);
+
+  return value
+    .split("_")
+    .map(
+      (word) =>
+        word.charAt(0).toUpperCase() +
+        word.slice(1)
+    )
+    .join(" ");
+};
+
+
+const getDepartment = (record) => {
   return (
-    item?.status ||
-    item?.collectionStatus ||
-    item?.taskStatus ||
-    "PENDING"
-  )
-    .toString()
-    .toUpperCase();
-}
-
-function getWasteId(item) {
-  return item?._id || item?.id || item?.wasteId;
-}
-
-function getRobotId(item) {
-  return (
-    item?.robotId ||
-    item?.robot?.robotId ||
-    item?.assignedRobotId ||
-    item?.task?.robotId ||
-    null
+    record?.sourceLocation ||
+    record?.department ||
+    record?.sourceDepartment ||
+    record?.pickupDepartment ||
+    record?.task?.department ||
+    record?.taskId?.department ||
+    "Not assigned"
   );
-}
+};
 
-function getDepartment(item) {
-  return item?.department || item?.sourceDepartment || "—";
-}
 
-function getCategory(item) {
+const getRobotId = (record) => {
+  return (
+    record?.robotId ||
+    record?.robot?.robotId ||
+    record?.assignedRobot ||
+    record?.assignedRobotId ||
+    record?.task?.robotId ||
+    record?.taskId?.robotId ||
+    "Not assigned"
+  );
+};
+
+
+const getCategory = (record) => {
   return normalizeCategory(
-    item?.category ||
-      item?.expectedCategory ||
-      item?.classification ||
-      item?.wasteCategory ||
+    record?.category ||
+      record?.expectedCategory ||
+      record?.bin ||
       "general"
   );
-}
+};
 
-function getWeight(item) {
-  const value = item?.weight;
 
-  if (value === undefined || value === null || value === "") {
-    return "—";
+const getConfidence = (record) => {
+  const confidence = Number(
+    record?.confidence ??
+      record?.aiConfidence ??
+      0
+  );
+
+  if (confidence <= 1) {
+    return Math.round(confidence * 100);
   }
 
-  return `${value} kg`;
-}
+  return Math.round(confidence);
+};
 
-function formatDate(value) {
+
+const getWeight = (record) => {
+  const weight = Number(record?.weight ?? 0);
+
+  return Number.isFinite(weight)
+    ? weight
+    : 0;
+};
+
+
+const getWasteId = (record, index) => {
+  return (
+    record?.wasteId ||
+    record?.id ||
+    record?._id ||
+    `TEMP-${index + 1}`
+  );
+};
+
+
+const formatDate = (value) => {
   if (!value) return "—";
 
   const date = new Date(value);
@@ -184,856 +137,1813 @@ function formatDate(value) {
   }
 
   return date.toLocaleString();
-}
+};
 
-function getStatusConfig(status) {
-  return (
-    STATUS_CONFIG[status] || {
-      label: status || "Pending",
-      className: "bg-slate-100 text-slate-700 border-slate-200",
-    }
-  );
-}
+
+/* ============================================================
+   CATEGORY CONFIG
+============================================================ */
+
+const CATEGORY_CONFIG = {
+  yellow: {
+    label: "Yellow Bin",
+    dot: "bg-yellow-400",
+    bg: "bg-yellow-50",
+    border: "border-yellow-300",
+    text: "text-yellow-800",
+  },
+
+  red: {
+    label: "Red Bin",
+    dot: "bg-red-500",
+    bg: "bg-red-50",
+    border: "border-red-300",
+    text: "text-red-800",
+  },
+
+  blue: {
+    label: "Blue Bin",
+    dot: "bg-blue-500",
+    bg: "bg-blue-50",
+    border: "border-blue-300",
+    text: "text-blue-800",
+  },
+
+  general: {
+    label: "General Bin",
+    dot: "bg-purple-300",
+    bg: "bg-slate-50",
+    border: "border-slate-300",
+    text: "text-slate-800",
+  },
+};
+
+
+/* ============================================================
+   STATUS CONFIG
+============================================================ */
+
+const STATUS_CONFIG = {
+  pending: {
+    label: "Pending",
+    className:
+      "bg-yellow-50 text-yellow-700 border-yellow-200",
+  },
+
+  confirmed: {
+    label: "Confirmed",
+    className:
+      "bg-blue-50 text-blue-700 border-blue-200",
+  },
+
+  dispatched: {
+    label: "Dispatched",
+    className:
+      "bg-indigo-50 text-indigo-700 border-indigo-200",
+  },
+
+  moving_to_pickup: {
+    label: "Moving to Pickup",
+    className:
+      "bg-purple-50 text-purple-700 border-purple-200",
+  },
+
+  arrived_at_pickup: {
+    label: "Arrived at Pickup",
+    className:
+      "bg-cyan-50 text-cyan-700 border-cyan-200",
+  },
+
+  collecting: {
+    label: "Collecting",
+    className:
+      "bg-orange-50 text-orange-700 border-orange-200",
+  },
+
+  moving_to_bin: {
+    label: "Moving to Bin",
+    className:
+      "bg-indigo-50 text-indigo-700 border-indigo-200",
+  },
+
+  depositing: {
+    label: "Depositing",
+    className:
+      "bg-violet-50 text-violet-700 border-violet-200",
+  },
+
+  collected: {
+    label: "Collected",
+    className:
+      "bg-green-50 text-green-700 border-green-200",
+  },
+
+  disposed: {
+    label: "Disposed",
+    className:
+      "bg-emerald-50 text-emerald-700 border-emerald-200",
+  },
+
+  returning: {
+    label: "Returning",
+    className:
+      "bg-sky-50 text-sky-700 border-sky-200",
+  },
+
+  completed: {
+    label: "Completed",
+    className:
+      "bg-green-50 text-green-700 border-green-200",
+  },
+
+  cancelled: {
+    label: "Cancelled",
+    className:
+      "bg-slate-100 text-slate-600 border-slate-200",
+  },
+
+  failed: {
+    label: "Failed",
+    className:
+      "bg-red-50 text-red-700 border-red-200",
+  },
+};
+
+
+/* ============================================================
+   STATUS BADGE
+============================================================ */
 
 function StatusBadge({ status }) {
-  const config = getStatusConfig(status);
+  const normalized = normalizeStatus(status);
+
+  const config =
+    STATUS_CONFIG[normalized] || {
+      label: formatStatus(normalized),
+      className:
+        "bg-slate-50 text-slate-700 border-slate-200",
+    };
 
   return (
     <span
-      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${config.className}`}
+      className={`
+        inline-flex
+        items-center
+        gap-2
+        px-3
+        py-1.5
+        rounded-full
+        border
+        text-xs
+        font-semibold
+        whitespace-nowrap
+        ${config.className}
+      `}
     >
-      <span className="h-2 w-2 rounded-full bg-current" />
+      <span className="w-2 h-2 rounded-full bg-current" />
       {config.label}
     </span>
   );
 }
+
+
+/* ============================================================
+   BIN BADGE
+============================================================ */
 
 function BinBadge({ category }) {
-  const config = BIN_CONFIG[normalizeCategory(category)] || BIN_CONFIG.general;
+  const normalized = normalizeCategory(category);
+
+  const config =
+    CATEGORY_CONFIG[normalized] ||
+    CATEGORY_CONFIG.general;
 
   return (
-    <span
-      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold ${config.className}`}
+    <div
+      className={`
+        inline-flex
+        items-center
+        gap-2
+        px-3
+        py-1.5
+        rounded-lg
+        border
+        ${config.bg}
+        ${config.border}
+        ${config.text}
+      `}
     >
-      <span>{config.icon}</span>
-      {config.label}
-    </span>
-  );
-}
+      <span
+        className={`
+          w-3
+          h-3
+          rounded-full
+          ${config.dot}
+        `}
+      />
 
-function StatCard({ title, value, icon, description }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-500">{title}</p>
-
-          <p className="mt-2 text-3xl font-bold text-slate-900">
-            {value}
-          </p>
-
-          {description && (
-            <p className="mt-1 text-xs text-slate-500">{description}</p>
-          )}
-        </div>
-
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-xl">
-          {icon}
-        </div>
-      </div>
+      <span className="text-xs font-semibold">
+        {config.label}
+      </span>
     </div>
   );
 }
 
+
+/* ============================================================
+   MAIN COMPONENT
+============================================================ */
+
 export default function WasteRegister() {
   const [records, setRecords] = useState([]);
+
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+
   const [error, setError] = useState("");
+
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [categoryFilter, setCategoryFilter] = useState("ALL");
-  const [selectedWaste, setSelectedWaste] = useState(null);
 
-  const loadWaste = useCallback(async (showLoading = false) => {
+  const [statusFilter, setStatusFilter] =
+    useState("ALL");
+
+  const [binFilter, setBinFilter] =
+    useState("ALL");
+
+  const [selectedWaste, setSelectedWaste] =
+    useState(null);
+
+  const [socketOnline, setSocketOnline] =
+    useState(false);
+
+
+  /* ==========================================================
+     LOAD WASTE
+  ========================================================== */
+
+  const loadWaste = async () => {
     try {
-      if (showLoading) {
-        setLoading(true);
-      } else {
-        setRefreshing(true);
-      }
-
-      const response = await wasteApi.list();
-
-      /*
-       * Your api.js unwraps:
-       *
-       * { success: true, data: [...] }
-       *
-       * into [...]
-       *
-       * But this also supports APIs that return { items: [...] }.
-       */
-      let data = response;
-
-      if (Array.isArray(response)) {
-        data = response;
-      } else if (Array.isArray(response?.items)) {
-        data = response.items;
-      } else if (Array.isArray(response?.records)) {
-        data = response.records;
-      } else if (Array.isArray(response?.data)) {
-        data = response.data;
-      } else {
-        data = [];
-      }
-
-      setRecords(data);
       setError("");
+
+      const response =
+        await wasteApi.list({
+          page: 1,
+          limit: 100,
+        });
+
+      const data =
+        response?.data?.data ??
+        response?.data ??
+        [];
+
+      setRecords(
+        Array.isArray(data)
+          ? data
+          : []
+      );
     } catch (err) {
-      console.error("Unable to load waste records:", err);
-      setError(err?.message || "Unable to load waste records.");
+      console.error(
+        "Failed to load waste:",
+        err
+      );
+
+      setError(
+        err?.message ||
+          "Unable to load waste records."
+      );
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
-  }, []);
+  };
+
+
+  /* ==========================================================
+     INITIAL LOAD + POLLING
+  ========================================================== */
 
   useEffect(() => {
-    loadWaste(true);
+    loadWaste();
 
-    const interval = setInterval(() => {
-      loadWaste(false);
-    }, REFRESH_INTERVAL);
+    const interval = setInterval(
+      loadWaste,
+      5000
+    );
 
     return () => {
       clearInterval(interval);
     };
-  }, [loadWaste]);
+  }, []);
 
-  /*
-   * Real-time Digital Twin events.
-   *
-   * Different backend implementations sometimes use slightly different event
-   * names, so we listen to the common names used by the robot simulator.
-   */
+
+  /* ==========================================================
+     SOCKET CONNECTION
+  ========================================================== */
+
   useEffect(() => {
-    if (!socket) return undefined;
+    try {
+      connectDigitalTwin();
+      setSocketOnline(true);
+    } catch (err) {
+      console.warn(
+        "Socket connection failed:",
+        err
+      );
 
-    const refresh = () => {
-      loadWaste(false);
+      setSocketOnline(false);
+    }
+
+
+    const refreshWaste = (payload) => {
+      console.log(
+        "♻️ Waste live update:",
+        payload
+      );
+
+      /*
+       * Reload from MongoDB.
+       *
+       * This is important because the
+       * socket payload may contain only
+       * partial robot/task information.
+       *
+       * MongoDB remains the source of truth.
+       */
+      loadWaste();
     };
 
-    const events = [
-      "robot:status",
-      "robot-status",
-      "robotStatus",
-      "digital-twin:update",
-      "digitalTwin:update",
-      "waste:update",
-      "waste:updated",
-      "collection:update",
-      "collection:completed",
-      "task:update",
-    ];
 
-    events.forEach((eventName) => {
-      socket.on(eventName, refresh);
-    });
+    const handleConnect = () => {
+      console.log(
+        "🟢 Waste Register socket connected"
+      );
+
+      setSocketOnline(true);
+    };
+
+
+    const handleDisconnect = () => {
+      console.log(
+        "🔴 Waste Register socket disconnected"
+      );
+
+      setSocketOnline(false);
+    };
+
+
+    socket.on(
+      "connect",
+      handleConnect
+    );
+
+    socket.on(
+      "disconnect",
+      handleDisconnect
+    );
+
+
+    /* Waste events */
+
+    socket.on(
+      "waste:update",
+      refreshWaste
+    );
+
+    socket.on(
+      "waste:updated",
+      refreshWaste
+    );
+
+    socket.on(
+      "collection:update",
+      refreshWaste
+    );
+
+    socket.on(
+      "collection:completed",
+      refreshWaste
+    );
+
+    socket.on(
+      "task:update",
+      refreshWaste
+    );
+
+
+    /* Robot events */
+
+    socket.on(
+      "robot:status",
+      refreshWaste
+    );
+
+    socket.on(
+      "robot-status",
+      refreshWaste
+    );
+
+    socket.on(
+      "robotStatus",
+      refreshWaste
+    );
+
+    socket.on(
+      "digital-twin:update",
+      refreshWaste
+    );
+
+    socket.on(
+      "digitalTwin:update",
+      refreshWaste
+    );
+
 
     return () => {
-      events.forEach((eventName) => {
-        socket.off(eventName, refresh);
-      });
+      socket.off(
+        "connect",
+        handleConnect
+      );
+
+      socket.off(
+        "disconnect",
+        handleDisconnect
+      );
+
+      socket.off(
+        "waste:update",
+        refreshWaste
+      );
+
+      socket.off(
+        "waste:updated",
+        refreshWaste
+      );
+
+      socket.off(
+        "collection:update",
+        refreshWaste
+      );
+
+      socket.off(
+        "collection:completed",
+        refreshWaste
+      );
+
+      socket.off(
+        "task:update",
+        refreshWaste
+      );
+
+      socket.off(
+        "robot:status",
+        refreshWaste
+      );
+
+      socket.off(
+        "robot-status",
+        refreshWaste
+      );
+
+      socket.off(
+        "robotStatus",
+        refreshWaste
+      );
+
+      socket.off(
+        "digital-twin:update",
+        refreshWaste
+      );
+
+      socket.off(
+        "digitalTwin:update",
+        refreshWaste
+      );
+
+      disconnectDigitalTwin();
     };
-  }, [loadWaste]);
+  }, []);
+
+
+  /* ==========================================================
+     NORMALIZED RECORDS
+  ========================================================== */
+
+  const normalizedRecords = useMemo(() => {
+    return records.map(
+      (record, index) => ({
+        ...record,
+
+        displayWasteId:
+          getWasteId(
+            record,
+            index
+          ),
+
+        displayCategory:
+          getCategory(record),
+
+        displayDepartment:
+          getDepartment(record),
+
+        displayRobot:
+          getRobotId(record),
+
+        displayStatus:
+          normalizeStatus(
+            record?.status
+          ),
+
+        displayWeight:
+          getWeight(record),
+
+        displayConfidence:
+          getConfidence(record),
+
+        displayDate:
+          record?.createdAt ||
+          record?.updatedAt ||
+          record?.collectedAt,
+      })
+    );
+  }, [records]);
+
+
+  /* ==========================================================
+     FILTER RECORDS
+  ========================================================== */
 
   const filteredRecords = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const query =
+      search.trim().toLowerCase();
 
-    return records.filter((item) => {
-      const status = getWasteStatus(item);
-      const category = getCategory(item);
-      const robotId = getRobotId(item);
-      const department = getDepartment(item);
+    return normalizedRecords.filter(
+      (record) => {
+        const matchesSearch =
+          !query ||
+          String(
+            record.displayWasteId
+          )
+            .toLowerCase()
+            .includes(query) ||
+          String(
+            record.itemType || ""
+          )
+            .toLowerCase()
+            .includes(query) ||
+          String(
+            record.displayRobot
+          )
+            .toLowerCase()
+            .includes(query) ||
+          String(
+            record.displayDepartment
+          )
+            .toLowerCase()
+            .includes(query) ||
+          String(
+            record.displayCategory
+          )
+            .toLowerCase()
+            .includes(query);
 
-      const matchesSearch =
-        !query ||
-        String(
-          item?.name ||
-            item?.itemName ||
-            item?.wasteId ||
-            item?._id ||
-            ""
-        )
-          .toLowerCase()
-          .includes(query) ||
-        String(category).toLowerCase().includes(query) ||
-        String(robotId || "")
-          .toLowerCase()
-          .includes(query) ||
-        String(department).toLowerCase().includes(query);
 
-      const matchesStatus =
-        statusFilter === "ALL" || status === statusFilter;
+        const matchesStatus =
+          statusFilter === "ALL" ||
+          record.displayStatus ===
+            normalizeStatus(
+              statusFilter
+            );
 
-      const matchesCategory =
-        categoryFilter === "ALL" || category === categoryFilter;
 
-      return matchesSearch && matchesStatus && matchesCategory;
-    });
-  }, [records, search, statusFilter, categoryFilter]);
+        const matchesBin =
+          binFilter === "ALL" ||
+          record.displayCategory ===
+            binFilter;
+
+
+        return (
+          matchesSearch &&
+          matchesStatus &&
+          matchesBin
+        );
+      }
+    );
+  }, [
+    normalizedRecords,
+    search,
+    statusFilter,
+    binFilter,
+  ]);
+
+
+  /* ==========================================================
+     STATISTICS
+  ========================================================== */
 
   const statistics = useMemo(() => {
-    let pending = 0;
-    let active = 0;
-    let disposed = 0;
-    let total = records.length;
+    const total =
+      normalizedRecords.length;
 
-    records.forEach((item) => {
-      const status = getWasteStatus(item);
+    const pending =
+      normalizedRecords.filter(
+        (record) =>
+          [
+            "pending",
+            "confirmed",
+            "dispatched",
+            "moving_to_pickup",
+            "arrived_at_pickup",
+            "collecting",
+            "moving_to_bin",
+            "depositing",
+          ].includes(
+            record.displayStatus
+          )
+      ).length;
 
-      if (
-        ["PENDING", "CONFIRMED"].includes(status)
-      ) {
-        pending += 1;
-      }
 
-      if (
-        [
-          "DISPATCHED",
-          "MOVING_TO_PICKUP",
-          "ARRIVED_AT_PICKUP",
-          "COLLECTING",
-          "MOVING_TO_BIN",
-          "DEPOSITING",
-          "RETURNING",
-        ].includes(status)
-      ) {
-        active += 1;
-      }
+    const activeRobots =
+      normalizedRecords.filter(
+        (record) =>
+          [
+            "dispatched",
+            "moving_to_pickup",
+            "arrived_at_pickup",
+            "collecting",
+            "moving_to_bin",
+            "depositing",
+            "returning",
+          ].includes(
+            record.displayStatus
+          )
+      ).length;
 
-      if (
-        ["DISPOSED", "COMPLETED"].includes(status)
-      ) {
-        disposed += 1;
-      }
-    });
+
+    const disposed =
+      normalizedRecords.filter(
+        (record) =>
+          [
+            "disposed",
+            "completed",
+          ].includes(
+            record.displayStatus
+          )
+      ).length;
+
 
     return {
       total,
       pending,
-      active,
+      activeRobots,
       disposed,
     };
-  }, [records]);
+  }, [normalizedRecords]);
 
-  const handleRefresh = () => {
-    loadWaste(false);
+
+  /* ==========================================================
+     EXPORT
+  ========================================================== */
+
+  const handleExport = async () => {
+    try {
+      /*
+       * If your api.js has exportWaste(),
+       * use it.
+       */
+      if (
+        typeof wasteApi.export ===
+        "function"
+      ) {
+        await wasteApi.export();
+        return;
+      }
+
+
+      if (
+        typeof wasteApi.exportWaste ===
+        "function"
+      ) {
+        await wasteApi.exportWaste();
+        return;
+      }
+
+
+      /*
+       * Frontend fallback CSV.
+       */
+
+      const header = [
+        "Waste ID",
+        "Category",
+        "Department",
+        "Robot",
+        "Weight (kg)",
+        "Status",
+        "AI Confidence",
+        "Date",
+      ];
+
+
+      const rows =
+        normalizedRecords.map(
+          (record) => [
+            record.displayWasteId,
+            record.displayCategory,
+            record.displayDepartment,
+            record.displayRobot,
+            record.displayWeight,
+            record.displayStatus,
+            `${record.displayConfidence}%`,
+            record.displayDate
+              ? new Date(
+                  record.displayDate
+                ).toISOString()
+              : "",
+          ]
+        );
+
+
+      const csv = [
+        header,
+        ...rows,
+      ]
+        .map((row) =>
+          row
+            .map((value) =>
+              `"${String(
+                value ?? ""
+              ).replace(
+                /"/g,
+                '""'
+              )}"`
+            )
+            .join(",")
+        )
+        .join("\n");
+
+
+      const blob =
+        new Blob(
+          [csv],
+          {
+            type:
+              "text/csv;charset=utf-8;",
+          }
+        );
+
+
+      const url =
+        URL.createObjectURL(
+          blob
+        );
+
+
+      const link =
+        document.createElement(
+          "a"
+        );
+
+      link.href = url;
+
+      link.download =
+        "meditwin-waste-register.csv";
+
+      document.body.appendChild(
+        link
+      );
+
+      link.click();
+
+      link.remove();
+
+      URL.revokeObjectURL(
+        url
+      );
+    } catch (err) {
+      console.error(
+        "Export failed:",
+        err
+      );
+
+      alert(
+        "Unable to export waste records."
+      );
+    }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-6 lg:p-8">
-      <div className="mx-auto max-w-7xl">
-        {/* HEADER */}
-        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-2xl">
-                ♻️
-              </div>
 
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900 md:text-3xl">
-                  Waste Management
-                </h1>
+  /* ==========================================================
+     LOADING
+  ========================================================== */
 
-                <p className="mt-1 text-sm text-slate-500">
-                  Track biomedical waste from AI classification to robot
-                  collection and final bin disposal.
-                </p>
-              </div>
-            </div>
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-8">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="w-10 h-10 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin mx-auto mb-4" />
+
+            <p className="text-slate-500">
+              Loading waste records...
+            </p>
           </div>
-
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <span className={refreshing ? "animate-spin" : ""}>↻</span>
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </button>
         </div>
+      </div>
+    );
+  }
 
-        {/* FLOW */}
-        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4">
-            <h2 className="font-semibold text-slate-900">
-              Waste Collection Flow
-            </h2>
 
-            <p className="mt-1 text-xs text-slate-500">
-              The status below updates as the Digital Twin simulation
-              progresses.
+  /* ==========================================================
+     UI
+  ========================================================== */
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-5 md:p-8">
+
+      {/* ======================================================
+          HEADER
+      ====================================================== */}
+
+      <div className="mb-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">
+              Waste Management
+            </h1>
+
+            <p className="text-sm text-slate-500 mt-1">
+              Complete biomedical waste register
+              with robot tracking
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            {[
-              ["1", "AI Scan", "🔍"],
-              ["2", "Human Confirm", "✓"],
-              ["3", "Robot Pickup", "🤖"],
-              ["4", "Correct Bin", "🗑️"],
-              ["5", "Completed", "✅"],
-            ].map(([number, title, icon]) => (
-              <div
-                key={number}
-                className="flex items-center gap-3 rounded-xl bg-slate-50 p-3"
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-lg shadow-sm">
-                  {icon}
-                </div>
 
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                    Step {number}
-                  </p>
+          <div className="flex items-center gap-3">
 
-                  <p className="text-xs font-semibold text-slate-700">
-                    {title}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+            <div
+              className={`
+                px-3
+                py-2
+                rounded-full
+                text-xs
+                font-semibold
+                border
+                ${
+                  socketOnline
+                    ? "bg-green-50 text-green-700 border-green-200"
+                    : "bg-yellow-50 text-yellow-700 border-yellow-200"
+                }
+              `}
+            >
+              <span className="inline-block w-2 h-2 rounded-full bg-current mr-2" />
 
-        {/* STATISTICS */}
-        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <StatCard
-            title="Total Waste"
-            value={statistics.total}
-            icon="📦"
-            description="Registered waste records"
-          />
-
-          <StatCard
-            title="Pending"
-            value={statistics.pending}
-            icon="⏳"
-            description="Waiting for collection"
-          />
-
-          <StatCard
-            title="Robot Active"
-            value={statistics.active}
-            icon="🤖"
-            description="Currently being handled"
-          />
-
-          <StatCard
-            title="Disposed"
-            value={statistics.disposed}
-            icon="✅"
-            description="Successfully placed in bin"
-          />
-        </div>
-
-        {/* ERROR */}
-        {error && (
-          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            <div className="flex items-start gap-3">
-              <span className="text-lg">⚠️</span>
-
-              <div>
-                <p className="font-semibold">
-                  Unable to load waste records
-                </p>
-
-                <p className="mt-1">{error}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* FILTERS */}
-        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 md:grid-cols-3">
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Search
-              </label>
-
-              <input
-                type="text"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search waste, robot, category..."
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
-              />
+              {socketOnline
+                ? "LIVE"
+                : "OFFLINE"}
             </div>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Status
-              </label>
 
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-              >
-                <option value="ALL">All Status</option>
-                <option value="PENDING">Pending</option>
-                <option value="CONFIRMED">Confirmed</option>
-                <option value="DISPATCHED">Robot Dispatched</option>
-                <option value="MOVING_TO_PICKUP">
-                  Moving to Pickup
-                </option>
-                <option value="ARRIVED_AT_PICKUP">
-                  Arrived at Pickup
-                </option>
-                <option value="COLLECTING">Collecting</option>
-                <option value="MOVING_TO_BIN">Moving to Bin</option>
-                <option value="DEPOSITING">Depositing</option>
-                <option value="DISPOSED">Disposed</option>
-                <option value="COMPLETED">Completed</option>
-                <option value="RETURNING">Returning</option>
-                <option value="FAILED">Failed</option>
-              </select>
-            </div>
+            <button
+              onClick={handleExport}
+              className="
+                px-4
+                py-2.5
+                bg-slate-900
+                text-white
+                rounded-lg
+                text-sm
+                font-semibold
+                hover:bg-slate-800
+                transition
+              "
+            >
+              Export CSV
+            </button>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Bin
-              </label>
-
-              <select
-                value={categoryFilter}
-                onChange={(event) => setCategoryFilter(event.target.value)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-              >
-                <option value="ALL">All Bins</option>
-                <option value="yellow">Yellow Bin</option>
-                <option value="red">Red Bin</option>
-                <option value="blue">Blue Bin</option>
-                <option value="general">General Bin</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* TABLE */}
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-2 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="font-semibold text-slate-900">
-                Waste Records
-              </h2>
-
-              <p className="mt-1 text-xs text-slate-500">
-                Showing {filteredRecords.length} of {records.length} records
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
-              Live updates enabled
-            </div>
           </div>
 
-          {loading ? (
-            <div className="flex min-h-[300px] items-center justify-center">
-              <div className="text-center">
-                <div className="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-emerald-500" />
-
-                <p className="text-sm font-medium text-slate-600">
-                  Loading waste records...
-                </p>
-              </div>
-            </div>
-          ) : filteredRecords.length === 0 ? (
-            <div className="flex min-h-[300px] flex-col items-center justify-center px-6 text-center">
-              <div className="mb-4 text-5xl">📦</div>
-
-              <h3 className="font-semibold text-slate-800">
-                No waste records found
-              </h3>
-
-              <p className="mt-1 max-w-md text-sm text-slate-500">
-                Scan and confirm biomedical waste from the Scanner page.
-                Once a robot is dispatched, its collection progress will
-                appear here automatically.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1050px]">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                      Waste
-                    </th>
-
-                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                      Category / Bin
-                    </th>
-
-                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                      Department
-                    </th>
-
-                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                      Weight
-                    </th>
-
-                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                      Robot
-                    </th>
-
-                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                      Status
-                    </th>
-
-                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                      Date
-                    </th>
-
-                    <th className="px-5 py-4 text-right text-xs font-bold uppercase tracking-wide text-slate-500">
-                      Action
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-slate-100">
-                  {filteredRecords.map((item) => {
-                    const id = getWasteId(item);
-                    const category = getCategory(item);
-                    const robotId = getRobotId(item);
-                    const status = getWasteStatus(item);
-
-                    return (
-                      <tr
-                        key={id || `${item?.createdAt}-${Math.random()}`}
-                        className="transition hover:bg-slate-50"
-                      >
-                        {/* WASTE */}
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl">
-                              🗑️
-                            </div>
-
-                            <div className="min-w-0">
-                              <p className="truncate font-semibold text-slate-900">
-                                {item?.name ||
-                                  item?.itemName ||
-                                  item?.wasteType ||
-                                  "Biomedical Waste"}
-                              </p>
-
-                              <p className="mt-1 max-w-[180px] truncate text-xs text-slate-400">
-                                ID: {item?.wasteId || item?._id || "—"}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* CATEGORY */}
-                        <td className="px-5 py-4">
-                          <BinBadge category={category} />
-
-                          {item?.confidence !== undefined &&
-                            item?.confidence !== null && (
-                              <p className="mt-1 text-xs text-slate-400">
-                                AI confidence:{" "}
-                                {Math.round(Number(item.confidence) * 100)}%
-                              </p>
-                            )}
-                        </td>
-
-                        {/* DEPARTMENT */}
-                        <td className="px-5 py-4">
-                          <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700">
-                            {getDepartment(item)}
-                          </span>
-                        </td>
-
-                        {/* WEIGHT */}
-                        <td className="px-5 py-4">
-                          <span className="text-sm font-medium text-slate-700">
-                            {getWeight(item)}
-                          </span>
-                        </td>
-
-                        {/* ROBOT */}
-                        <td className="px-5 py-4">
-                          {robotId ? (
-                            <div className="flex items-center gap-2">
-                              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-100">
-                                🤖
-                              </div>
-
-                              <div>
-                                <p className="text-sm font-semibold text-slate-800">
-                                  {robotId}
-                                </p>
-
-                                <p className="text-xs text-slate-400">
-                                  Collection robot
-                                </p>
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-slate-400">
-                              Not assigned
-                            </span>
-                          )}
-                        </td>
-
-                        {/* STATUS */}
-                        <td className="px-5 py-4">
-                          <StatusBadge status={status} />
-                        </td>
-
-                        {/* DATE */}
-                        <td className="px-5 py-4">
-                          <span className="text-xs text-slate-500">
-                            {formatDate(
-                              item?.createdAt || item?.updatedAt
-                            )}
-                          </span>
-                        </td>
-
-                        {/* ACTION */}
-                        <td className="px-5 py-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedWaste(item)}
-                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            View
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* DETAILS MODAL */}
-      {selectedWaste && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
-          onClick={() => setSelectedWaste(null)}
-        >
-          <div
-            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">
-                  Waste Details
-                </h2>
 
-                <p className="mt-1 text-xs text-slate-500">
-                  Collection and disposal information
-                </p>
-              </div>
+      {/* ======================================================
+          ERROR
+      ====================================================== */}
 
-              <button
-                type="button"
-                onClick={() => setSelectedWaste(null)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200"
-              >
-                ✕
-              </button>
+      {error && (
+        <div className="mb-5 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+          {error}
+        </div>
+      )}
+
+
+      {/* ======================================================
+          STAT CARDS
+      ====================================================== */}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+
+        {/* Total */}
+
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-slate-500">
+                Total Waste
+              </p>
+
+              <p className="text-3xl font-bold text-slate-900 mt-2">
+                {statistics.total}
+              </p>
+
+              <p className="text-xs text-slate-500 mt-1">
+                Registered waste records
+              </p>
             </div>
 
-            <div className="space-y-5 p-6">
-              {/* STATUS */}
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">
-                  Current Status
-                </p>
-
-                <StatusBadge status={getWasteStatus(selectedWaste)} />
-              </div>
-
-              {/* DETAILS */}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Waste ID
-                  </p>
-
-                  <p className="mt-1 break-all text-sm font-medium text-slate-800">
-                    {selectedWaste?.wasteId ||
-                      selectedWaste?._id ||
-                      "—"}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Department
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium text-slate-800">
-                    {getDepartment(selectedWaste)}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Category
-                  </p>
-
-                  <div className="mt-1">
-                    <BinBadge category={getCategory(selectedWaste)} />
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Weight
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium text-slate-800">
-                    {getWeight(selectedWaste)}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Assigned Robot
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium text-slate-800">
-                    {getRobotId(selectedWaste) || "Not assigned"}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    Created
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium text-slate-800">
-                    {formatDate(selectedWaste?.createdAt)}
-                  </p>
-                </div>
-              </div>
-
-              {/* ROBOT FLOW */}
-              <div>
-                <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">
-                  Robot Collection Progress
-                </p>
-
-                <div className="space-y-2">
-                  {[
-                    ["DISPATCHED", "Robot dispatched"],
-                    ["MOVING_TO_PICKUP", "Robot travelling to waste"],
-                    ["ARRIVED_AT_PICKUP", "Robot arrived at waste"],
-                    ["COLLECTING", "Waste being collected"],
-                    ["MOVING_TO_BIN", "Robot travelling to correct bin"],
-                    ["DEPOSITING", "Waste being deposited"],
-                    ["RETURNING", "Robot returning to station"],
-                    ["IDLE", "Robot ready"],
-                  ].map(([stepStatus, label], index) => {
-                    const currentStatus = getWasteStatus(selectedWaste);
-
-                    const statusOrder = [
-                      "DISPATCHED",
-                      "MOVING_TO_PICKUP",
-                      "ARRIVED_AT_PICKUP",
-                      "COLLECTING",
-                      "MOVING_TO_BIN",
-                      "DEPOSITING",
-                      "RETURNING",
-                    ];
-
-                    const currentIndex =
-                      statusOrder.indexOf(currentStatus);
-
-                    const stepIndex =
-                      statusOrder.indexOf(stepStatus);
-
-                    const completed =
-                      currentStatus === "DISPOSED" ||
-                      currentStatus === "COMPLETED" ||
-                      (stepIndex !== -1 &&
-                        currentIndex >= stepIndex);
-
-                    return (
-                      <div
-                        key={stepStatus}
-                        className="flex items-center gap-3"
-                      >
-                        <div
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                            completed
-                              ? "bg-emerald-500 text-white"
-                              : "bg-slate-100 text-slate-400"
-                          }`}
-                        >
-                          {completed ? "✓" : index + 1}
-                        </div>
-
-                        <p
-                          className={`text-sm ${
-                            completed
-                              ? "font-semibold text-slate-800"
-                              : "text-slate-400"
-                          }`}
-                        >
-                          {label}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* DIGITAL TWIN */}
-              <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="text-2xl">🤖</div>
-
-                  <div>
-                    <p className="font-semibold text-indigo-900">
-                      Digital Twin Simulation
-                    </p>
-
-                    <p className="mt-1 text-xs leading-5 text-indigo-700">
-                      The robot simulation represents the collection route:
-                      pickup location → correct biomedical waste bin →
-                      disposal → return to charging station.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* CLOSE */}
-              <button
-                type="button"
-                onClick={() => setSelectedWaste(null)}
-                className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-              >
-                Close
-              </button>
+            <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center text-xl">
+              📦
             </div>
           </div>
         </div>
+
+
+        {/* Pending */}
+
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-slate-500">
+                Pending
+              </p>
+
+              <p className="text-3xl font-bold text-slate-900 mt-2">
+                {statistics.pending}
+              </p>
+
+              <p className="text-xs text-slate-500 mt-1">
+                Waiting for collection
+              </p>
+            </div>
+
+            <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center text-xl">
+              ⏳
+            </div>
+          </div>
+        </div>
+
+
+        {/* Robot */}
+
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-slate-500">
+                Robot Active
+              </p>
+
+              <p className="text-3xl font-bold text-slate-900 mt-2">
+                {statistics.activeRobots}
+              </p>
+
+              <p className="text-xs text-slate-500 mt-1">
+                Currently being handled
+              </p>
+            </div>
+
+            <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center text-xl">
+              🤖
+            </div>
+          </div>
+        </div>
+
+
+        {/* Disposed */}
+
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-slate-500">
+                Disposed
+              </p>
+
+              <p className="text-3xl font-bold text-slate-900 mt-2">
+                {statistics.disposed}
+              </p>
+
+              <p className="text-xs text-slate-500 mt-1">
+                Successfully placed in bin
+              </p>
+            </div>
+
+            <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center text-xl">
+              ✅
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+
+      {/* ======================================================
+          FILTERS
+      ====================================================== */}
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm mb-6">
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+          {/* Search */}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">
+              Search
+            </label>
+
+            <input
+              type="text"
+              value={search}
+              onChange={(e) =>
+                setSearch(
+                  e.target.value
+                )
+              }
+              placeholder="Search waste, robot, department..."
+              className="
+                w-full
+                px-4
+                py-3
+                bg-slate-50
+                border
+                border-slate-200
+                rounded-xl
+                outline-none
+                focus:ring-2
+                focus:ring-blue-200
+                focus:border-blue-400
+                text-sm
+              "
+            />
+          </div>
+
+
+          {/* Status */}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">
+              Status
+            </label>
+
+            <select
+              value={statusFilter}
+              onChange={(e) =>
+                setStatusFilter(
+                  e.target.value
+                )
+              }
+              className="
+                w-full
+                px-4
+                py-3
+                bg-slate-50
+                border
+                border-slate-200
+                rounded-xl
+                outline-none
+                text-sm
+              "
+            >
+              <option value="ALL">
+                All Status
+              </option>
+
+              <option value="pending">
+                Pending
+              </option>
+
+              <option value="confirmed">
+                Confirmed
+              </option>
+
+              <option value="dispatched">
+                Dispatched
+              </option>
+
+              <option value="moving_to_pickup">
+                Moving to Pickup
+              </option>
+
+              <option value="collecting">
+                Collecting
+              </option>
+
+              <option value="moving_to_bin">
+                Moving to Bin
+              </option>
+
+              <option value="depositing">
+                Depositing
+              </option>
+
+              <option value="collected">
+                Collected
+              </option>
+
+              <option value="disposed">
+                Disposed
+              </option>
+
+              <option value="returning">
+                Returning
+              </option>
+
+              <option value="completed">
+                Completed
+              </option>
+
+              <option value="failed">
+                Failed
+              </option>
+            </select>
+          </div>
+
+
+          {/* Bin */}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">
+              Bin
+            </label>
+
+            <select
+              value={binFilter}
+              onChange={(e) =>
+                setBinFilter(
+                  e.target.value
+                )
+              }
+              className="
+                w-full
+                px-4
+                py-3
+                bg-slate-50
+                border
+                border-slate-200
+                rounded-xl
+                outline-none
+                text-sm
+              "
+            >
+              <option value="ALL">
+                All Bins
+              </option>
+
+              <option value="yellow">
+                Yellow Bin
+              </option>
+
+              <option value="red">
+                Red Bin
+              </option>
+
+              <option value="blue">
+                Blue Bin
+              </option>
+
+              <option value="general">
+                General Bin
+              </option>
+            </select>
+          </div>
+
+        </div>
+      </div>
+
+
+      {/* ======================================================
+          TABLE
+      ====================================================== */}
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+
+        {/* Table Header */}
+
+        <div className="px-5 py-5 border-b border-slate-200 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">
+              Waste Records
+            </h2>
+
+            <p className="text-sm text-slate-500 mt-1">
+              Showing{" "}
+              <span className="font-semibold text-slate-700">
+                {filteredRecords.length}
+              </span>{" "}
+              of{" "}
+              <span className="font-semibold text-slate-700">
+                {normalizedRecords.length}
+              </span>{" "}
+              records
+            </p>
+          </div>
+
+
+          <div className="flex items-center gap-2 text-sm text-slate-500">
+            <span className="w-2 h-2 bg-green-500 rounded-full" />
+
+            Live updates enabled
+          </div>
+
+        </div>
+
+
+        {/* Empty */}
+
+        {filteredRecords.length === 0 ? (
+          <div className="py-20 text-center">
+
+            <div className="text-5xl mb-4">
+              🗑️
+            </div>
+
+            <h3 className="font-semibold text-slate-800">
+              No waste records found
+            </h3>
+
+            <p className="text-sm text-slate-500 mt-1">
+              Try changing your search or filters.
+            </p>
+
+          </div>
+        ) : (
+
+          <div className="overflow-x-auto">
+
+            <table className="w-full min-w-[1100px]">
+
+              <thead className="bg-slate-50 border-b border-slate-200">
+
+                <tr>
+
+                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
+                    Waste
+                  </th>
+
+                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
+                    Category / Bin
+                  </th>
+
+                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
+                    Department
+                  </th>
+
+                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
+                    Weight
+                  </th>
+
+                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
+                    Robot
+                  </th>
+
+                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
+                    Status
+                  </th>
+
+                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
+                    Date
+                  </th>
+
+                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
+                    Action
+                  </th>
+
+                </tr>
+
+              </thead>
+
+
+              <tbody className="divide-y divide-slate-100">
+
+                {filteredRecords.map(
+                  (record, index) => (
+
+                    <tr
+                      key={
+                        record._id ||
+                        record.wasteId ||
+                        `${record.displayWasteId}-${index}`
+                      }
+                      className="hover:bg-slate-50 transition"
+                    >
+
+                      {/* ====================================
+                          WASTE
+                      ==================================== */}
+
+                      <td className="px-5 py-5">
+
+                        <div className="flex items-center gap-3">
+
+                          <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center text-xl">
+                            🗑️
+                          </div>
+
+                          <div>
+
+                            <p className="font-semibold text-slate-900">
+                              {record.itemType ||
+                                "Biomedical Waste"}
+                            </p>
+
+                            <p className="text-xs text-slate-400 mt-1">
+                              ID:{" "}
+                              {record.displayWasteId}
+                            </p>
+
+                          </div>
+
+                        </div>
+
+                      </td>
+
+
+                      {/* ====================================
+                          CATEGORY
+                      ==================================== */}
+
+                      <td className="px-5 py-5">
+
+                        <BinBadge
+                          category={
+                            record.displayCategory
+                          }
+                        />
+
+                        <p className="text-xs text-slate-400 mt-1">
+                          AI confidence:{" "}
+                          <span className="font-medium">
+                            {
+                              record.displayConfidence
+                            }
+                            %
+                          </span>
+                        </p>
+
+                      </td>
+
+
+                      {/* ====================================
+                          DEPARTMENT
+                      ==================================== */}
+
+                      <td className="px-5 py-5">
+
+                        <div className="flex items-center gap-2">
+
+                          <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center">
+                            🏥
+                          </div>
+
+                          <div>
+
+                            <p
+                              className={`
+                                font-semibold
+                                text-sm
+                                ${
+                                  record.displayDepartment ===
+                                  "Not assigned"
+                                    ? "text-slate-400"
+                                    : "text-slate-800"
+                                }
+                              `}
+                            >
+                              {
+                                record.displayDepartment
+                              }
+                            </p>
+
+                            <p className="text-xs text-slate-400">
+                              Pickup location
+                            </p>
+
+                          </div>
+
+                        </div>
+
+                      </td>
+
+
+                      {/* ====================================
+                          WEIGHT
+                      ==================================== */}
+
+                      <td className="px-5 py-5">
+
+                        <span className="font-semibold text-slate-800">
+                          {
+                            record.displayWeight
+                          }{" "}
+                          kg
+                        </span>
+
+                      </td>
+
+
+                      {/* ====================================
+                          ROBOT
+                      ==================================== */}
+
+                      <td className="px-5 py-5">
+
+                        <div className="flex items-center gap-2">
+
+                          <div
+                            className={`
+                              w-9
+                              h-9
+                              rounded-lg
+                              flex
+                              items-center
+                              justify-center
+                              ${
+                                record.displayRobot !==
+                                "Not assigned"
+                                  ? "bg-purple-50"
+                                  : "bg-slate-100"
+                              }
+                            `}
+                          >
+                            🤖
+                          </div>
+
+                          <div>
+
+                            <p
+                              className={`
+                                text-sm
+                                font-semibold
+                                ${
+                                  record.displayRobot !==
+                                  "Not assigned"
+                                    ? "text-slate-800"
+                                    : "text-slate-400"
+                                }
+                              `}
+                            >
+                              {
+                                record.displayRobot
+                              }
+                            </p>
+
+                            <p className="text-xs text-slate-400">
+                              Assigned robot
+                            </p>
+
+                          </div>
+
+                        </div>
+
+                      </td>
+
+
+                      {/* ====================================
+                          STATUS
+                      ==================================== */}
+
+                      <td className="px-5 py-5">
+
+                        <StatusBadge
+                          status={
+                            record.displayStatus
+                          }
+                        />
+
+                      </td>
+
+
+                      {/* ====================================
+                          DATE
+                      ==================================== */}
+
+                      <td className="px-5 py-5">
+
+                        <span className="text-sm text-slate-600 whitespace-nowrap">
+                          {formatDate(
+                            record.displayDate
+                          )}
+                        </span>
+
+                      </td>
+
+
+                      {/* ====================================
+                          ACTION
+                      ==================================== */}
+
+                      <td className="px-5 py-5">
+
+                        <button
+                          onClick={() =>
+                            setSelectedWaste(
+                              record
+                            )
+                          }
+                          className="
+                            px-4
+                            py-2
+                            border
+                            border-slate-200
+                            rounded-lg
+                            text-sm
+                            font-semibold
+                            text-slate-700
+                            hover:bg-slate-50
+                            transition
+                          "
+                        >
+                          View
+                        </button>
+
+                      </td>
+
+                    </tr>
+
+                  )
+                )}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        )}
+
+      </div>
+
+
+      {/* ======================================================
+          DETAILS MODAL
+      ====================================================== */}
+
+      {selectedWaste && (
+        <div
+          className="
+            fixed
+            inset-0
+            z-50
+            bg-black/40
+            flex
+            items-center
+            justify-center
+            p-5
+          "
+          onClick={() =>
+            setSelectedWaste(null)
+          }
+        >
+
+          <div
+            className="
+              bg-white
+              rounded-2xl
+              shadow-2xl
+              w-full
+              max-w-2xl
+              max-h-[90vh]
+              overflow-y-auto
+            "
+            onClick={(e) =>
+              e.stopPropagation()
+            }
+          >
+
+            {/* Modal header */}
+
+            <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+
+              <div>
+
+                <h2 className="text-xl font-bold text-slate-900">
+                  Waste Details
+                </h2>
+
+                <p className="text-sm text-slate-500 mt-1">
+                  {
+                    selectedWaste.displayWasteId
+                  }
+                </p>
+
+              </div>
+
+
+              <button
+                onClick={() =>
+                  setSelectedWaste(null)
+                }
+                className="
+                  w-9
+                  h-9
+                  rounded-lg
+                  bg-slate-100
+                  hover:bg-slate-200
+                  text-slate-600
+                "
+              >
+                ✕
+              </button>
+
+            </div>
+
+
+            {/* Modal content */}
+
+            <div className="p-6 space-y-5">
+
+              {/* Category */}
+
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase mb-2">
+                  Waste Category
+                </p>
+
+                <BinBadge
+                  category={
+                    selectedWaste.displayCategory
+                  }
+                />
+              </div>
+
+
+              {/* Department + Robot */}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
+
+                  <p className="text-xs font-semibold text-blue-500 uppercase">
+                    Department
+                  </p>
+
+                  <p className="text-lg font-bold text-blue-900 mt-2">
+                    {
+                      selectedWaste.displayDepartment
+                    }
+                  </p>
+
+                </div>
+
+
+                <div className="p-4 rounded-xl bg-purple-50 border border-purple-100">
+
+                  <p className="text-xs font-semibold text-purple-500 uppercase">
+                    Assigned Robot
+                  </p>
+
+                  <p className="text-lg font-bold text-purple-900 mt-2">
+                    {
+                      selectedWaste.displayRobot
+                    }
+                  </p>
+
+                </div>
+
+              </div>
+
+
+              {/* Status */}
+
+              <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200">
+
+                <div>
+
+                  <p className="text-xs font-semibold text-slate-400 uppercase">
+                    Current Status
+                  </p>
+
+                  <div className="mt-2">
+                    <StatusBadge
+                      status={
+                        selectedWaste.displayStatus
+                      }
+                    />
+                  </div>
+
+                </div>
+
+
+                <div className="text-right">
+
+                  <p className="text-xs font-semibold text-slate-400 uppercase">
+                    Weight
+                  </p>
+
+                  <p className="text-lg font-bold text-slate-900 mt-2">
+                    {
+                      selectedWaste.displayWeight
+                    }{" "}
+                    kg
+                  </p>
+
+                </div>
+
+              </div>
+
+
+              {/* Other information */}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                <div>
+
+                  <p className="text-xs text-slate-400">
+                    Waste ID
+                  </p>
+
+                  <p className="font-semibold text-slate-800 mt-1">
+                    {
+                      selectedWaste.displayWasteId
+                    }
+                  </p>
+
+                </div>
+
+
+                <div>
+
+                  <p className="text-xs text-slate-400">
+                    Item Type
+                  </p>
+
+                  <p className="font-semibold text-slate-800 mt-1">
+                    {
+                      selectedWaste.itemType ||
+                      "Biomedical Waste"
+                    }
+                  </p>
+
+                </div>
+
+
+                <div>
+
+                  <p className="text-xs text-slate-400">
+                    AI Confidence
+                  </p>
+
+                  <p className="font-semibold text-slate-800 mt-1">
+                    {
+                      selectedWaste.displayConfidence
+                    }
+                    %
+                  </p>
+
+                </div>
+
+
+                <div>
+
+                  <p className="text-xs text-slate-400">
+                    Created
+                  </p>
+
+                  <p className="font-semibold text-slate-800 mt-1">
+                    {formatDate(
+                      selectedWaste.createdAt
+                    )}
+                  </p>
+
+                </div>
+
+              </div>
+
+
+              {/* Raw debugging information */}
+
+              <details className="border border-slate-200 rounded-xl">
+
+                <summary className="cursor-pointer p-4 text-sm font-semibold text-slate-600">
+                  Technical Record
+                </summary>
+
+                <pre className="p-4 bg-slate-950 text-green-300 text-xs overflow-auto rounded-b-xl">
+                  {JSON.stringify(
+                    selectedWaste,
+                    null,
+                    2
+                  )}
+                </pre>
+
+              </details>
+
+            </div>
+
+          </div>
+
+        </div>
       )}
+
     </div>
   );
 }
