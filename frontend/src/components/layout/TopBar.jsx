@@ -39,7 +39,7 @@ export default function TopBar({ onOpenSidebar }) {
       <div
         className={clsx(
           'hidden items-center gap-2 rounded-pill border px-2.5 py-1 sm:flex',
-          connected ? 'border-state-ok/25 bg-state-ok-tint' : 'border-state-warn/30 bg-state-warn-tint'
+          connected ? 'border-state-ok/25 bg-state-ok-tint' : 'border-state-ok/25 bg-state-ok-tint'
         )}
         title={
           connected
