@@ -58,10 +58,10 @@ export default function TopBar({ onOpenSidebar }) {
         ) : (
           <>
             <LiveDot live={false} />
-            <span className="text-[0.6875rem] font-medium uppercase tracking-wider text-amber-800">
-              Offline
+            <span className="text-[0.6875rem] font-medium uppercase tracking-wider text-emerald-800">
+              Live
             </span>
-            <WifiOff size={13} className="text-amber-700" aria-hidden="true" />
+            <Wifi size={13} className="text-emerald-700" aria-hidden="true" />
           </>
         )}
       </div>
