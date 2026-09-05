@@ -1,7 +1,9 @@
+import mongoose from "mongoose";
+
 import Robot from "../models/Robot.js";
+import Waste from "../models/Waste.js";
 
 import ApiError from "../utils/ApiError.js";
-
 import asyncHandler from "../utils/asyncHandler.js";
 
 import {
@@ -11,69 +13,155 @@ import {
   clearStopCollection,
 } from "../services/robotSimulator.js";
 
-import { emitRobotStatus } from "../services/socketService.js";
+import {
+  emitRobotStatus,
+  emitToHospital,
+  EVENTS,
+} from "../services/socketService.js";
+
 
 /*
 |--------------------------------------------------------------------------
-| GET /api/v1/robots
+| DEFAULT DEMO HOSPITAL
 |--------------------------------------------------------------------------
 */
 
-export const listRobots = asyncHandler(
-  async (_req, res) => {
-    const robots = await Robot.find({})
-      .sort({
-        robotId: 1,
-      })
-      .lean();
+const DEFAULT_HOSPITAL_ID =
+  "DEFAULT_HOSPITAL";
 
-    res.json({
-      success: true,
 
-      data: robots,
-    });
+/*
+|--------------------------------------------------------------------------
+| HELPERS
+|--------------------------------------------------------------------------
+*/
+
+const normalizeCategory = (
+  category
+) => {
+  const value = String(
+    category || "general"
+  )
+    .trim()
+    .toLowerCase();
+
+  if (
+    value.includes("yellow")
+  ) {
+    return "yellow";
   }
-);
+
+  if (
+    value.includes("red")
+  ) {
+    return "red";
+  }
+
+  if (
+    value.includes("blue")
+  ) {
+    return "blue";
+  }
+
+  return "general";
+};
+
+
+const normalizeDepartment = (
+  department
+) => {
+  const value = String(
+    department || "GENERAL"
+  )
+    .trim()
+    .toUpperCase();
+
+  const validDepartments = [
+    "OT",
+    "ICU",
+    "WARD",
+    "GENERAL",
+    "EMERGENCY",
+    "PHARMACY",
+    "LABORATORY",
+  ];
+
+  return validDepartments.includes(
+    value
+  )
+    ? value
+    : "GENERAL";
+};
+
 
 /*
 |--------------------------------------------------------------------------
-| GET /api/v1/robots/:robotId
+| GET ROBOTS
 |--------------------------------------------------------------------------
 */
 
-export const getRobot = asyncHandler(
-  async (req, res) => {
-    const { robotId } = req.params;
+export const listRobots =
+  asyncHandler(
+    async (_req, res) => {
+      const robots =
+        await Robot.find({})
+          .sort({
+            robotId: 1,
+          })
+          .lean();
 
-    const robot =
-      await Robot.findOne({
-        robotId,
-      }).lean();
-
-    if (!robot) {
-      throw ApiError.notFound(
-        `Robot ${robotId} not found`
-      );
+      res.json({
+        success: true,
+        data: robots,
+      });
     }
+  );
 
-    res.json({
-      success: true,
-
-      data: robot,
-    });
-  }
-);
 
 /*
 |--------------------------------------------------------------------------
-| GET /api/v1/robots/:robotId/telemetry
+| GET SINGLE ROBOT
+|--------------------------------------------------------------------------
+*/
+
+export const getRobot =
+  asyncHandler(
+    async (req, res) => {
+      const {
+        robotId,
+      } = req.params;
+
+      const robot =
+        await Robot.findOne({
+          robotId,
+        }).lean();
+
+      if (!robot) {
+        throw ApiError.notFound(
+          `Robot ${robotId} not found`
+        );
+      }
+
+      res.json({
+        success: true,
+        data: robot,
+      });
+    }
+  );
+
+
+/*
+|--------------------------------------------------------------------------
+| GET ROBOT TELEMETRY
 |--------------------------------------------------------------------------
 */
 
 export const getTelemetry =
   asyncHandler(
     async (req, res) => {
-      const { robotId } = req.params;
+      const {
+        robotId,
+      } = req.params;
 
       const robot =
         await Robot.findOne({
@@ -124,24 +212,14 @@ export const getTelemetry =
     }
   );
 
+
 /*
 |--------------------------------------------------------------------------
-| POST /api/v1/robots/:robotId/dispatch
+| DISPATCH ROBOT
 |--------------------------------------------------------------------------
 |
-| Example:
-|
 | POST
-| /api/v1/robots/MEDI-001/dispatch
-|
-| Body:
-|
-| {
-|   "department": "OT",
-|   "expectedCategory": "yellow",
-|   "confidence": 0.94,
-|   "wasteId": "MW-0001"
-| }
+| /api/v1/robots/:robotId/dispatch
 |
 |--------------------------------------------------------------------------
 */
@@ -149,8 +227,9 @@ export const getTelemetry =
 export const dispatchRobot =
   asyncHandler(
     async (req, res) => {
-      const { robotId } =
-        req.params;
+      const {
+        robotId,
+      } = req.params;
 
       const {
         department = "OT",
@@ -161,7 +240,13 @@ export const dispatchRobot =
         confidence = 1,
 
         wasteId = null,
+
+        weight = 0,
+
+        itemType =
+          "Biomedical Waste",
       } = req.body || {};
+
 
       console.log(
         "🚀 Dispatch request:",
@@ -171,12 +256,16 @@ export const dispatchRobot =
           expectedCategory,
           confidence,
           wasteId,
+          weight,
         }
       );
 
+
       /*
-       * Find robot
-       */
+      |--------------------------------------------------------------------------
+      | FIND ROBOT
+      |--------------------------------------------------------------------------
+      */
 
       const robot =
         await Robot.findOne({
@@ -189,21 +278,28 @@ export const dispatchRobot =
         );
       }
 
+
       /*
-       * Robot must be IDLE
-       */
+      |--------------------------------------------------------------------------
+      | ROBOT MUST BE IDLE
+      |--------------------------------------------------------------------------
+      */
 
       if (
-        robot.status !== "IDLE"
+        robot.status !==
+        "IDLE"
       ) {
         throw ApiError.conflict(
           `Robot ${robotId} is currently ${robot.status}`
         );
       }
 
+
       /*
-       * Battery check
-       */
+      |--------------------------------------------------------------------------
+      | BATTERY
+      |--------------------------------------------------------------------------
+      */
 
       if (
         Number(
@@ -215,55 +311,46 @@ export const dispatchRobot =
         );
       }
 
+
       /*
-       * Validate category
-       */
-
-      const validCategories = [
-        "yellow",
-        "red",
-        "blue",
-        "general",
-      ];
-
-      const normalizedCategory =
-        String(
-          expectedCategory
-        ).toLowerCase();
+      |--------------------------------------------------------------------------
+      | NORMALIZE DATA
+      |--------------------------------------------------------------------------
+      */
 
       const category =
-        validCategories.includes(
-          normalizedCategory
-        )
-          ? normalizedCategory
-          : "general";
-
-      /*
-       * Validate department
-       */
-
-      const normalizedDepartment =
-        String(
-          department || "OT"
-        ).toUpperCase();
-
-      const validDepartments = [
-        "OT",
-        "ICU",
-        "WARD",
-        "GENERAL",
-      ];
+        normalizeCategory(
+          expectedCategory
+        );
 
       const finalDepartment =
-        validDepartments.includes(
-          normalizedDepartment
-        )
-          ? normalizedDepartment
-          : "GENERAL";
+        normalizeDepartment(
+          department
+        );
+
+      const numericConfidence =
+        Math.min(
+          1,
+          Math.max(
+            0,
+            Number(
+              confidence
+            ) || 0
+          )
+        );
+
+      const numericWeight =
+        Math.max(
+          0,
+          Number(weight) || 0
+        );
+
 
       /*
-       * Start simulation
-       */
+      |--------------------------------------------------------------------------
+      | START ROBOT COLLECTION
+      |--------------------------------------------------------------------------
+      */
 
       const task =
         await startCollection({
@@ -281,7 +368,7 @@ export const dispatchRobot =
             category,
 
           confidence:
-            Number(confidence) || 0,
+            numericConfidence,
 
           wasteId,
 
@@ -289,13 +376,224 @@ export const dispatchRobot =
             null,
         });
 
+
       /*
-       * Immediately notify frontend.
-       *
-       * The simulator will subsequently
-       * send MOVING_TO_PICKUP and
-       * position updates.
-       */
+      |--------------------------------------------------------------------------
+      | GET TASK OBJECT ID
+      |--------------------------------------------------------------------------
+      |
+      | startCollection may return:
+      |
+      | task._id
+      | task.task._id
+      | task.data._id
+      |
+      */
+
+      const taskObjectId =
+        task?._id ||
+        task?.task?._id ||
+        task?.data?._id ||
+        null;
+
+
+      /*
+      |--------------------------------------------------------------------------
+      | FIND WASTE RECORD
+      |--------------------------------------------------------------------------
+      */
+
+      let waste = null;
+
+      if (wasteId) {
+        const wasteFilter = {
+          $or: [
+            {
+              wasteId:
+                String(
+                  wasteId
+                ).toUpperCase(),
+            },
+          ],
+        };
+
+        if (
+          mongoose.Types.ObjectId.isValid(
+            wasteId
+          )
+        ) {
+          wasteFilter.$or.push({
+            _id: wasteId,
+          });
+        }
+
+        waste =
+          await Waste.findOne(
+            wasteFilter
+          );
+      }
+
+
+      /*
+      |--------------------------------------------------------------------------
+      | CREATE WASTE RECORD IF NOT FOUND
+      |--------------------------------------------------------------------------
+      |
+      | This makes the demo robust even when
+      | Scanner sends no persisted waste record.
+      |
+      */
+
+      if (!waste) {
+        const count =
+          await Waste.countDocuments();
+
+        const generatedWasteId =
+          wasteId
+            ? String(
+                wasteId
+              ).toUpperCase()
+            : `MW-${String(
+                count + 1
+              ).padStart(
+                4,
+                "0"
+              )}`;
+
+        const wasteData = {
+          wasteId:
+            generatedWasteId,
+
+          category,
+
+          originalCategory:
+            category,
+
+          itemType,
+
+          weight:
+            numericWeight,
+
+          sourceLocation:
+            finalDepartment,
+
+          robotId:
+            String(
+              robot.robotId
+            ).toUpperCase(),
+
+          status:
+            "dispatched",
+
+          confidence:
+            numericConfidence,
+
+          reviewedByHuman:
+            true,
+        };
+
+        if (
+          taskObjectId &&
+          mongoose.Types.ObjectId.isValid(
+            taskObjectId
+          )
+        ) {
+          wasteData.taskId =
+            taskObjectId;
+        }
+
+        if (
+          mongoose.Types.ObjectId.isValid(
+            robot.hospitalId
+          )
+        ) {
+          wasteData.hospitalId =
+            robot.hospitalId;
+        }
+
+        waste =
+          await Waste.create(
+            wasteData
+          );
+
+        console.log(
+          "🆕 Waste record created during dispatch:",
+          waste.wasteId
+        );
+      }
+
+
+      /*
+      |--------------------------------------------------------------------------
+      | UPDATE EXISTING WASTE RECORD
+      |--------------------------------------------------------------------------
+      */
+
+      else {
+        waste.robotId =
+          String(
+            robot.robotId
+          ).toUpperCase();
+
+        waste.sourceLocation =
+          finalDepartment;
+
+        waste.category =
+          category;
+
+        waste.confidence =
+          numericConfidence;
+
+        waste.status =
+          "dispatched";
+
+        if (
+          taskObjectId &&
+          mongoose.Types.ObjectId.isValid(
+            taskObjectId
+          )
+        ) {
+          waste.taskId =
+            taskObjectId;
+        }
+
+        /*
+         * The human already confirmed
+         * the classification before dispatch.
+         */
+
+        waste.reviewedByHuman =
+          true;
+
+        await waste.save();
+
+        console.log(
+          "♻️ Waste record updated:",
+          {
+            wasteId:
+              waste.wasteId,
+
+            robotId:
+              waste.robotId,
+
+            department:
+              waste.sourceLocation,
+
+            taskId:
+              waste.taskId,
+
+            status:
+              waste.status,
+          }
+        );
+      }
+
+
+      /*
+      |--------------------------------------------------------------------------
+      | ROBOT STATUS SOCKET
+      |--------------------------------------------------------------------------
+      */
 
       emitRobotStatus(
         robot.robotId,
@@ -313,14 +611,48 @@ export const dispatchRobot =
           targetBin:
             category,
 
+          currentTaskId:
+            taskObjectId,
+
+          wasteId:
+            waste.wasteId,
+
           lastActivity:
             `Dispatched to ${finalDepartment}`,
         }
       );
 
+
       /*
-       * Response
-       */
+      |--------------------------------------------------------------------------
+      | WASTE SOCKET
+      |--------------------------------------------------------------------------
+      */
+
+      try {
+        const hospitalId =
+          robot.hospitalId ||
+          DEFAULT_HOSPITAL_ID;
+
+        emitToHospital(
+          hospitalId,
+          EVENTS.WASTE_COLLECTED,
+          waste.toJSON()
+        );
+      } catch (socketError) {
+        console.warn(
+          "Waste dispatch socket skipped:",
+          socketError?.message ||
+            socketError
+        );
+      }
+
+
+      /*
+      |--------------------------------------------------------------------------
+      | RESPONSE
+      |--------------------------------------------------------------------------
+      */
 
       res.status(201).json({
         success: true,
@@ -331,6 +663,11 @@ export const dispatchRobot =
         data: {
           task,
 
+          waste,
+
+          wasteId:
+            waste.wasteId,
+
           robotId:
             robot.robotId,
 
@@ -340,23 +677,26 @@ export const dispatchRobot =
           expectedCategory:
             category,
 
-          wasteId,
+          confidence:
+            numericConfidence,
         },
       });
     }
   );
 
+
 /*
 |--------------------------------------------------------------------------
-| POST /api/v1/robots/:robotId/recall
+| RECALL ROBOT
 |--------------------------------------------------------------------------
 */
 
 export const recallRobot =
   asyncHandler(
     async (req, res) => {
-      const { robotId } =
-        req.params;
+      const {
+        robotId,
+      } = req.params;
 
       const robot =
         await Robot.findOne({
@@ -385,17 +725,19 @@ export const recallRobot =
     }
   );
 
+
 /*
 |--------------------------------------------------------------------------
-| POST /api/v1/robots/:robotId/stop
+| STOP ROBOT
 |--------------------------------------------------------------------------
 */
 
 export const stopRobot =
   asyncHandler(
     async (req, res) => {
-      const { robotId } =
-        req.params;
+      const {
+        robotId,
+      } = req.params;
 
       const robot =
         await Robot.findOne({
@@ -412,10 +754,6 @@ export const stopRobot =
         await stopCollection(
           robotId
         );
-
-      /*
-       * Socket notification
-       */
 
       emitRobotStatus(
         robotId,
@@ -442,17 +780,19 @@ export const stopRobot =
     }
   );
 
+
 /*
 |--------------------------------------------------------------------------
-| POST /api/v1/robots/:robotId/clear-stop
+| CLEAR ROBOT STOP
 |--------------------------------------------------------------------------
 */
 
 export const clearRobotStop =
   asyncHandler(
     async (req, res) => {
-      const { robotId } =
-        req.params;
+      const {
+        robotId,
+      } = req.params;
 
       const robot =
         await Robot.findOne({
@@ -469,10 +809,6 @@ export const clearRobotStop =
         await clearStopCollection(
           robotId
         );
-
-      /*
-       * Socket notification
-       */
 
       emitRobotStatus(
         robotId,
