@@ -1,42 +1,101 @@
 import React, {
+  useCallback,
   useEffect,
   useMemo,
   useState,
 } from "react";
 
-import wasteApi from "../services/api";
-import socket, {
-  connectDigitalTwin,
-  disconnectDigitalTwin,
-} from "../services/socket";
+/*
+|--------------------------------------------------------------------------
+| API CONFIGURATION
+|--------------------------------------------------------------------------
+|
+| Vite production:
+|
+| VITE_API_URL=https://meditwin-digital-twin.onrender.com/api/v1
+|
+| Local:
+|
+| VITE_API_URL=http://localhost:5000/api/v1
+|
+|--------------------------------------------------------------------------
+*/
+
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  "https://meditwin-digital-twin.onrender.com/api/v1";
 
 
-/* ============================================================
-   HELPERS
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| CONSTANTS
+|--------------------------------------------------------------------------
+*/
 
-const normalizeCategory = (value) => {
-  const v = String(value || "")
+const STATUS_OPTIONS = [
+  "ALL",
+  "PENDING",
+  "CONFIRMED",
+  "DISPATCHED",
+  "MOVING_TO_PICKUP",
+  "ARRIVED_AT_PICKUP",
+  "COLLECTING",
+  "MOVING_TO_BIN",
+  "DEPOSITING",
+  "COLLECTED",
+  "DISPOSED",
+  "RETURNING",
+  "COMPLETED",
+  "CANCELLED",
+  "FAILED",
+];
+
+const BIN_OPTIONS = [
+  "ALL",
+  "yellow",
+  "red",
+  "blue",
+  "general",
+];
+
+
+/*
+|--------------------------------------------------------------------------
+| HELPERS
+|--------------------------------------------------------------------------
+*/
+
+const normalizeCategory = (category) => {
+  const value = String(category || "")
     .trim()
     .toLowerCase();
 
-  if (v.includes("yellow")) return "yellow";
-  if (v.includes("red")) return "red";
-  if (v.includes("blue")) return "blue";
+  if (value.includes("yellow")) {
+    return "yellow";
+  }
+
+  if (value.includes("red")) {
+    return "red";
+  }
+
+  if (value.includes("blue")) {
+    return "blue";
+  }
+
   if (
-    v.includes("general") ||
-    v.includes("non") ||
-    v.includes("municipal")
+    value.includes("general") ||
+    value.includes("non") ||
+    value.includes("municipal")
   ) {
     return "general";
   }
 
-  return v || "general";
+  return "general";
 };
 
 
-const normalizeStatus = (value) => {
-  return String(value || "pending")
+const normalizeStatus = (status) => {
+  return String(status || "pending")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "_");
@@ -57,311 +116,127 @@ const formatStatus = (status) => {
 };
 
 
-const getDepartment = (record) => {
-  return (
-    record?.sourceLocation ||
-    record?.department ||
-    record?.sourceDepartment ||
-    record?.pickupDepartment ||
-    record?.task?.department ||
-    record?.taskId?.department ||
-    "Not assigned"
-  );
-};
+const formatCategory = (category) => {
+  const value = normalizeCategory(category);
 
-
-const getRobotId = (record) => {
-  return (
-    record?.robotId ||
-    record?.robot?.robotId ||
-    record?.assignedRobot ||
-    record?.assignedRobotId ||
-    record?.task?.robotId ||
-    record?.taskId?.robotId ||
-    "Not assigned"
-  );
-};
-
-
-const getCategory = (record) => {
-  return normalizeCategory(
-    record?.category ||
-      record?.expectedCategory ||
-      record?.bin ||
-      "general"
-  );
-};
-
-
-const getConfidence = (record) => {
-  const confidence = Number(
-    record?.confidence ??
-      record?.aiConfidence ??
-      0
-  );
-
-  if (confidence <= 1) {
-    return Math.round(confidence * 100);
+  if (value === "yellow") {
+    return "Yellow Bin";
   }
 
-  return Math.round(confidence);
+  if (value === "red") {
+    return "Red Bin";
+  }
+
+  if (value === "blue") {
+    return "Blue Bin";
+  }
+
+  return "General Bin";
 };
 
 
-const getWeight = (record) => {
-  const weight = Number(record?.weight ?? 0);
+const formatConfidence = (confidence) => {
+  const value = Number(confidence);
 
-  return Number.isFinite(weight)
-    ? weight
-    : 0;
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+
+  /*
+   * Backend stores confidence between 0 and 1.
+   * But if an older record contains 31 instead of 0.31,
+   * handle that too.
+   */
+
+  if (value <= 1) {
+    return `${Math.round(value * 100)}%`;
+  }
+
+  return `${Math.round(value)}%`;
 };
 
 
-const getWasteId = (record, index) => {
-  return (
-    record?.wasteId ||
-    record?.id ||
-    record?._id ||
-    `TEMP-${index + 1}`
-  );
-};
-
-
-const formatDate = (value) => {
-  if (!value) return "—";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
+const formatDate = (date) => {
+  if (!date) {
     return "—";
   }
 
-  return date.toLocaleString();
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "—";
+  }
+
+  return parsed.toLocaleString();
 };
 
 
-/* ============================================================
-   CATEGORY CONFIG
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| API FETCH HELPER
+|--------------------------------------------------------------------------
+*/
 
-const CATEGORY_CONFIG = {
-  yellow: {
-    label: "Yellow Bin",
-    dot: "bg-yellow-400",
-    bg: "bg-yellow-50",
-    border: "border-yellow-300",
-    text: "text-yellow-800",
-  },
+const fetchWasteRecords = async () => {
+  const url =
+    `${API_BASE}/waste` +
+    "?page=1&limit=100";
 
-  red: {
-    label: "Red Bin",
-    dot: "bg-red-500",
-    bg: "bg-red-50",
-    border: "border-red-300",
-    text: "text-red-800",
-  },
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  });
 
-  blue: {
-    label: "Blue Bin",
-    dot: "bg-blue-500",
-    bg: "bg-blue-50",
-    border: "border-blue-300",
-    text: "text-blue-800",
-  },
+  if (!response.ok) {
+    throw new Error(
+      `Waste API failed: ${response.status}`
+    );
+  }
 
-  general: {
-    label: "General Bin",
-    dot: "bg-purple-300",
-    bg: "bg-slate-50",
-    border: "border-slate-300",
-    text: "text-slate-800",
-  },
+  const result = await response.json();
+
+  /*
+   * Expected backend:
+   *
+   * {
+   *   success: true,
+   *   data: [...]
+   * }
+   */
+
+  if (!result?.success) {
+    throw new Error(
+      result?.message ||
+        "Unable to load waste records"
+    );
+  }
+
+  return Array.isArray(result.data)
+    ? result.data
+    : [];
 };
 
 
-/* ============================================================
-   STATUS CONFIG
-============================================================ */
+/*
+|--------------------------------------------------------------------------
+| WASTE REGISTER
+|--------------------------------------------------------------------------
+*/
 
-const STATUS_CONFIG = {
-  pending: {
-    label: "Pending",
-    className:
-      "bg-yellow-50 text-yellow-700 border-yellow-200",
-  },
+function WasteRegister() {
+  const [wasteRecords, setWasteRecords] =
+    useState([]);
 
-  confirmed: {
-    label: "Confirmed",
-    className:
-      "bg-blue-50 text-blue-700 border-blue-200",
-  },
+  const [loading, setLoading] =
+    useState(true);
 
-  dispatched: {
-    label: "Dispatched",
-    className:
-      "bg-indigo-50 text-indigo-700 border-indigo-200",
-  },
+  const [error, setError] =
+    useState("");
 
-  moving_to_pickup: {
-    label: "Moving to Pickup",
-    className:
-      "bg-purple-50 text-purple-700 border-purple-200",
-  },
-
-  arrived_at_pickup: {
-    label: "Arrived at Pickup",
-    className:
-      "bg-cyan-50 text-cyan-700 border-cyan-200",
-  },
-
-  collecting: {
-    label: "Collecting",
-    className:
-      "bg-orange-50 text-orange-700 border-orange-200",
-  },
-
-  moving_to_bin: {
-    label: "Moving to Bin",
-    className:
-      "bg-indigo-50 text-indigo-700 border-indigo-200",
-  },
-
-  depositing: {
-    label: "Depositing",
-    className:
-      "bg-violet-50 text-violet-700 border-violet-200",
-  },
-
-  collected: {
-    label: "Collected",
-    className:
-      "bg-green-50 text-green-700 border-green-200",
-  },
-
-  disposed: {
-    label: "Disposed",
-    className:
-      "bg-emerald-50 text-emerald-700 border-emerald-200",
-  },
-
-  returning: {
-    label: "Returning",
-    className:
-      "bg-sky-50 text-sky-700 border-sky-200",
-  },
-
-  completed: {
-    label: "Completed",
-    className:
-      "bg-green-50 text-green-700 border-green-200",
-  },
-
-  cancelled: {
-    label: "Cancelled",
-    className:
-      "bg-slate-100 text-slate-600 border-slate-200",
-  },
-
-  failed: {
-    label: "Failed",
-    className:
-      "bg-red-50 text-red-700 border-red-200",
-  },
-};
-
-
-/* ============================================================
-   STATUS BADGE
-============================================================ */
-
-function StatusBadge({ status }) {
-  const normalized = normalizeStatus(status);
-
-  const config =
-    STATUS_CONFIG[normalized] || {
-      label: formatStatus(normalized),
-      className:
-        "bg-slate-50 text-slate-700 border-slate-200",
-    };
-
-  return (
-    <span
-      className={`
-        inline-flex
-        items-center
-        gap-2
-        px-3
-        py-1.5
-        rounded-full
-        border
-        text-xs
-        font-semibold
-        whitespace-nowrap
-        ${config.className}
-      `}
-    >
-      <span className="w-2 h-2 rounded-full bg-current" />
-      {config.label}
-    </span>
-  );
-}
-
-
-/* ============================================================
-   BIN BADGE
-============================================================ */
-
-function BinBadge({ category }) {
-  const normalized = normalizeCategory(category);
-
-  const config =
-    CATEGORY_CONFIG[normalized] ||
-    CATEGORY_CONFIG.general;
-
-  return (
-    <div
-      className={`
-        inline-flex
-        items-center
-        gap-2
-        px-3
-        py-1.5
-        rounded-lg
-        border
-        ${config.bg}
-        ${config.border}
-        ${config.text}
-      `}
-    >
-      <span
-        className={`
-          w-3
-          h-3
-          rounded-full
-          ${config.dot}
-        `}
-      />
-
-      <span className="text-xs font-semibold">
-        {config.label}
-      </span>
-    </div>
-  );
-}
-
-
-/* ============================================================
-   MAIN COMPONENT
-============================================================ */
-
-export default function WasteRegister() {
-  const [records, setRecords] = useState([]);
-
-  const [loading, setLoading] = useState(true);
-
-  const [error, setError] = useState("");
-
-  const [search, setSearch] = useState("");
+  const [search, setSearch] =
+    useState("");
 
   const [statusFilter, setStatusFilter] =
     useState("ALL");
@@ -372,795 +247,730 @@ export default function WasteRegister() {
   const [selectedWaste, setSelectedWaste] =
     useState(null);
 
-  const [socketOnline, setSocketOnline] =
-    useState(false);
+  const [lastUpdated, setLastUpdated] =
+    useState(null);
 
 
-  /* ==========================================================
-     LOAD WASTE
-  ========================================================== */
+  /*
+  |--------------------------------------------------------------------------
+  | LOAD WASTE
+  |--------------------------------------------------------------------------
+  */
 
-  const loadWaste = async () => {
-    try {
-      setError("");
+  const loadWaste = useCallback(
+    async (showLoader = true) => {
+      try {
+        if (showLoader) {
+          setLoading(true);
+        }
 
-      const response =
-        await wasteApi.list({
-          page: 1,
-          limit: 100,
-        });
+        setError("");
 
-      const data =
-        response?.data?.data ??
-        response?.data ??
-        [];
+        const records =
+          await fetchWasteRecords();
 
-      setRecords(
-        Array.isArray(data)
-          ? data
-          : []
-      );
-    } catch (err) {
-      console.error(
-        "Failed to load waste:",
-        err
-      );
+        setWasteRecords(records);
 
-      setError(
-        err?.message ||
-          "Unable to load waste records."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+        setLastUpdated(
+          new Date()
+        );
+      } catch (err) {
+        console.error(
+          "Failed to load waste:",
+          err
+        );
+
+        setError(
+          err?.message ||
+            "Failed to load waste records."
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
 
 
-  /* ==========================================================
-     INITIAL LOAD + POLLING
-  ========================================================== */
+  /*
+  |--------------------------------------------------------------------------
+  | INITIAL LOAD + AUTO REFRESH
+  |--------------------------------------------------------------------------
+  */
 
   useEffect(() => {
-    loadWaste();
+    loadWaste(true);
 
-    const interval = setInterval(
-      loadWaste,
-      5000
-    );
+    const interval =
+      setInterval(() => {
+        loadWaste(false);
+      }, 5000);
 
     return () => {
       clearInterval(interval);
     };
-  }, []);
+  }, [loadWaste]);
 
 
-  /* ==========================================================
-     SOCKET CONNECTION
-  ========================================================== */
+  /*
+  |--------------------------------------------------------------------------
+  | NORMALIZED RECORDS
+  |--------------------------------------------------------------------------
+  */
 
-  useEffect(() => {
-    try {
-      connectDigitalTwin();
-      setSocketOnline(true);
-    } catch (err) {
-      console.warn(
-        "Socket connection failed:",
-        err
-      );
-
-      setSocketOnline(false);
-    }
-
-
-    const refreshWaste = (payload) => {
-      console.log(
-        "♻️ Waste live update:",
-        payload
-      );
-
-      /*
-       * Reload from MongoDB.
-       *
-       * This is important because the
-       * socket payload may contain only
-       * partial robot/task information.
-       *
-       * MongoDB remains the source of truth.
-       */
-      loadWaste();
-    };
-
-
-    const handleConnect = () => {
-      console.log(
-        "🟢 Waste Register socket connected"
-      );
-
-      setSocketOnline(true);
-    };
-
-
-    const handleDisconnect = () => {
-      console.log(
-        "🔴 Waste Register socket disconnected"
-      );
-
-      setSocketOnline(false);
-    };
-
-
-    socket.on(
-      "connect",
-      handleConnect
-    );
-
-    socket.on(
-      "disconnect",
-      handleDisconnect
-    );
-
-
-    /* Waste events */
-
-    socket.on(
-      "waste:update",
-      refreshWaste
-    );
-
-    socket.on(
-      "waste:updated",
-      refreshWaste
-    );
-
-    socket.on(
-      "collection:update",
-      refreshWaste
-    );
-
-    socket.on(
-      "collection:completed",
-      refreshWaste
-    );
-
-    socket.on(
-      "task:update",
-      refreshWaste
-    );
-
-
-    /* Robot events */
-
-    socket.on(
-      "robot:status",
-      refreshWaste
-    );
-
-    socket.on(
-      "robot-status",
-      refreshWaste
-    );
-
-    socket.on(
-      "robotStatus",
-      refreshWaste
-    );
-
-    socket.on(
-      "digital-twin:update",
-      refreshWaste
-    );
-
-    socket.on(
-      "digitalTwin:update",
-      refreshWaste
-    );
-
-
-    return () => {
-      socket.off(
-        "connect",
-        handleConnect
-      );
-
-      socket.off(
-        "disconnect",
-        handleDisconnect
-      );
-
-      socket.off(
-        "waste:update",
-        refreshWaste
-      );
-
-      socket.off(
-        "waste:updated",
-        refreshWaste
-      );
-
-      socket.off(
-        "collection:update",
-        refreshWaste
-      );
-
-      socket.off(
-        "collection:completed",
-        refreshWaste
-      );
-
-      socket.off(
-        "task:update",
-        refreshWaste
-      );
-
-      socket.off(
-        "robot:status",
-        refreshWaste
-      );
-
-      socket.off(
-        "robot-status",
-        refreshWaste
-      );
-
-      socket.off(
-        "robotStatus",
-        refreshWaste
-      );
-
-      socket.off(
-        "digital-twin:update",
-        refreshWaste
-      );
-
-      socket.off(
-        "digitalTwin:update",
-        refreshWaste
-      );
-
-      disconnectDigitalTwin();
-    };
-  }, []);
-
-
-  /* ==========================================================
-     NORMALIZED RECORDS
-  ========================================================== */
-
-  const normalizedRecords = useMemo(() => {
-    return records.map(
-      (record, index) => ({
-        ...record,
-
-        displayWasteId:
-          getWasteId(
-            record,
-            index
-          ),
-
-        displayCategory:
-          getCategory(record),
-
-        displayDepartment:
-          getDepartment(record),
-
-        displayRobot:
-          getRobotId(record),
-
-        displayStatus:
-          normalizeStatus(
-            record?.status
-          ),
-
-        displayWeight:
-          getWeight(record),
-
-        displayConfidence:
-          getConfidence(record),
-
-        displayDate:
-          record?.createdAt ||
-          record?.updatedAt ||
-          record?.collectedAt,
-      })
-    );
-  }, [records]);
-
-
-  /* ==========================================================
-     FILTER RECORDS
-  ========================================================== */
-
-  const filteredRecords = useMemo(() => {
-    const query =
-      search.trim().toLowerCase();
-
-    return normalizedRecords.filter(
-      (record) => {
-        const matchesSearch =
-          !query ||
-          String(
-            record.displayWasteId
-          )
-            .toLowerCase()
-            .includes(query) ||
-          String(
-            record.itemType || ""
-          )
-            .toLowerCase()
-            .includes(query) ||
-          String(
-            record.displayRobot
-          )
-            .toLowerCase()
-            .includes(query) ||
-          String(
-            record.displayDepartment
-          )
-            .toLowerCase()
-            .includes(query) ||
-          String(
-            record.displayCategory
-          )
-            .toLowerCase()
-            .includes(query);
-
-
-        const matchesStatus =
-          statusFilter === "ALL" ||
-          record.displayStatus ===
-            normalizeStatus(
-              statusFilter
+  const normalizedRecords =
+    useMemo(() => {
+      return wasteRecords.map(
+        (record) => {
+          const category =
+            normalizeCategory(
+              record.category
             );
 
+          const status =
+            normalizeStatus(
+              record.status
+            );
 
-        const matchesBin =
-          binFilter === "ALL" ||
-          record.displayCategory ===
-            binFilter;
+          /*
+           * Department can come from:
+           *
+           * sourceLocation
+           * department
+           * source
+           */
 
+          const department =
+            record.sourceLocation ||
+            record.department ||
+            record.source ||
+            "—";
 
-        return (
-          matchesSearch &&
-          matchesStatus &&
-          matchesBin
-        );
-      }
-    );
-  }, [
-    normalizedRecords,
-    search,
-    statusFilter,
-    binFilter,
-  ]);
+          /*
+           * Robot can come from:
+           *
+           * robotId
+           * robot
+           * robot.robotId
+           */
 
+          let robotId =
+            record.robotId;
 
-  /* ==========================================================
-     STATISTICS
-  ========================================================== */
-
-  const statistics = useMemo(() => {
-    const total =
-      normalizedRecords.length;
-
-    const pending =
-      normalizedRecords.filter(
-        (record) =>
-          [
-            "pending",
-            "confirmed",
-            "dispatched",
-            "moving_to_pickup",
-            "arrived_at_pickup",
-            "collecting",
-            "moving_to_bin",
-            "depositing",
-          ].includes(
-            record.displayStatus
-          )
-      ).length;
-
-
-    const activeRobots =
-      normalizedRecords.filter(
-        (record) =>
-          [
-            "dispatched",
-            "moving_to_pickup",
-            "arrived_at_pickup",
-            "collecting",
-            "moving_to_bin",
-            "depositing",
-            "returning",
-          ].includes(
-            record.displayStatus
-          )
-      ).length;
-
-
-    const disposed =
-      normalizedRecords.filter(
-        (record) =>
-          [
-            "disposed",
-            "completed",
-          ].includes(
-            record.displayStatus
-          )
-      ).length;
-
-
-    return {
-      total,
-      pending,
-      activeRobots,
-      disposed,
-    };
-  }, [normalizedRecords]);
-
-
-  /* ==========================================================
-     EXPORT
-  ========================================================== */
-
-  const handleExport = async () => {
-    try {
-      /*
-       * If your api.js has exportWaste(),
-       * use it.
-       */
-      if (
-        typeof wasteApi.export ===
-        "function"
-      ) {
-        await wasteApi.export();
-        return;
-      }
-
-
-      if (
-        typeof wasteApi.exportWaste ===
-        "function"
-      ) {
-        await wasteApi.exportWaste();
-        return;
-      }
-
-
-      /*
-       * Frontend fallback CSV.
-       */
-
-      const header = [
-        "Waste ID",
-        "Category",
-        "Department",
-        "Robot",
-        "Weight (kg)",
-        "Status",
-        "AI Confidence",
-        "Date",
-      ];
-
-
-      const rows =
-        normalizedRecords.map(
-          (record) => [
-            record.displayWasteId,
-            record.displayCategory,
-            record.displayDepartment,
-            record.displayRobot,
-            record.displayWeight,
-            record.displayStatus,
-            `${record.displayConfidence}%`,
-            record.displayDate
-              ? new Date(
-                  record.displayDate
-                ).toISOString()
-              : "",
-          ]
-        );
-
-
-      const csv = [
-        header,
-        ...rows,
-      ]
-        .map((row) =>
-          row
-            .map((value) =>
-              `"${String(
-                value ?? ""
-              ).replace(
-                /"/g,
-                '""'
-              )}"`
-            )
-            .join(",")
-        )
-        .join("\n");
-
-
-      const blob =
-        new Blob(
-          [csv],
-          {
-            type:
-              "text/csv;charset=utf-8;",
+          if (
+            !robotId &&
+            typeof record.robot ===
+              "string"
+          ) {
+            robotId =
+              record.robot;
           }
-        );
 
+          if (
+            !robotId &&
+            record.robot?.robotId
+          ) {
+            robotId =
+              record.robot.robotId;
+          }
 
-      const url =
-        URL.createObjectURL(
-          blob
-        );
+          return {
+            ...record,
 
+            category,
 
-      const link =
-        document.createElement(
-          "a"
-        );
+            status,
 
-      link.href = url;
+            department,
 
-      link.download =
-        "meditwin-waste-register.csv";
+            robotId:
+              robotId ||
+              "Not assigned",
 
-      document.body.appendChild(
-        link
+            confidence:
+              record.confidence ??
+              record.aiConfidence ??
+              0,
+
+            weight:
+              Number(
+                record.weight || 0
+              ),
+          };
+        }
       );
+    }, [wasteRecords]);
 
-      link.click();
 
-      link.remove();
+  /*
+  |--------------------------------------------------------------------------
+  | FILTER
+  |--------------------------------------------------------------------------
+  */
 
-      URL.revokeObjectURL(
-        url
+  const filteredRecords =
+    useMemo(() => {
+      const query =
+        search
+          .trim()
+          .toLowerCase();
+
+      return normalizedRecords.filter(
+        (record) => {
+          /*
+           * Search
+           */
+
+          const searchableText =
+            [
+              record.wasteId,
+              record.itemType,
+              record.category,
+              record.department,
+              record.robotId,
+              record.status,
+            ]
+              .filter(Boolean)
+              .join(" ")
+              .toLowerCase();
+
+          if (
+            query &&
+            !searchableText.includes(
+              query
+            )
+          ) {
+            return false;
+          }
+
+          /*
+           * Status
+           */
+
+          if (
+            statusFilter !== "ALL" &&
+            record.status !==
+              statusFilter.toLowerCase()
+          ) {
+            return false;
+          }
+
+          /*
+           * Bin
+           */
+
+          if (
+            binFilter !== "ALL" &&
+            record.category !==
+              binFilter
+          ) {
+            return false;
+          }
+
+          return true;
+        }
       );
-    } catch (err) {
-      console.error(
-        "Export failed:",
-        err
-      );
+    }, [
+      normalizedRecords,
+      search,
+      statusFilter,
+      binFilter,
+    ]);
 
-      alert(
-        "Unable to export waste records."
-      );
+
+  /*
+  |--------------------------------------------------------------------------
+  | DASHBOARD COUNTS
+  |--------------------------------------------------------------------------
+  */
+
+  const stats =
+    useMemo(() => {
+      const total =
+        normalizedRecords.length;
+
+      const pending =
+        normalizedRecords.filter(
+          (record) =>
+            [
+              "pending",
+              "confirmed",
+            ].includes(
+              record.status
+            )
+        ).length;
+
+      const active =
+        normalizedRecords.filter(
+          (record) =>
+            [
+              "dispatched",
+              "moving_to_pickup",
+              "arrived_at_pickup",
+              "collecting",
+              "moving_to_bin",
+              "depositing",
+              "returning",
+            ].includes(
+              record.status
+            )
+        ).length;
+
+      const disposed =
+        normalizedRecords.filter(
+          (record) =>
+            [
+              "disposed",
+              "completed",
+            ].includes(
+              record.status
+            )
+        ).length;
+
+      return {
+        total,
+        pending,
+        active,
+        disposed,
+      };
+    }, [normalizedRecords]);
+
+
+  /*
+  |--------------------------------------------------------------------------
+  | BIN STYLE
+  |--------------------------------------------------------------------------
+  */
+
+  const getBinStyle = (category) => {
+    switch (
+      normalizeCategory(category)
+    ) {
+      case "yellow":
+        return {
+          background:
+            "#fff7cc",
+          border:
+            "#facc15",
+          text:
+            "#92400e",
+          dot:
+            "#eab308",
+        };
+
+      case "red":
+        return {
+          background:
+            "#fee2e2",
+          border:
+            "#f87171",
+          text:
+            "#991b1b",
+          dot:
+            "#ef4444",
+        };
+
+      case "blue":
+        return {
+          background:
+            "#dbeafe",
+          border:
+            "#60a5fa",
+          text:
+            "#1e40af",
+          dot:
+            "#3b82f6",
+        };
+
+      default:
+        return {
+          background:
+            "#f3f4f6",
+          border:
+            "#cbd5e1",
+          text:
+            "#334155",
+          dot:
+            "#a855f7",
+        };
     }
   };
 
 
-  /* ==========================================================
-     LOADING
-  ========================================================== */
+  /*
+  |--------------------------------------------------------------------------
+  | STATUS STYLE
+  |--------------------------------------------------------------------------
+  */
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 p-8">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="w-10 h-10 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin mx-auto mb-4" />
+  const getStatusStyle = (status) => {
+    switch (
+      normalizeStatus(status)
+    ) {
+      case "pending":
+        return {
+          background:
+            "#fff7ed",
+          border:
+            "#fed7aa",
+          color:
+            "#c2410c",
+          dot:
+            "#f97316",
+        };
 
-            <p className="text-slate-500">
-              Loading waste records...
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+      case "confirmed":
+        return {
+          background:
+            "#dbeafe",
+          border:
+            "#bfdbfe",
+          color:
+            "#1d4ed8",
+          dot:
+            "#2563eb",
+        };
+
+      case "dispatched":
+      case "moving_to_pickup":
+      case "arrived_at_pickup":
+      case "collecting":
+      case "moving_to_bin":
+      case "depositing":
+      case "returning":
+        return {
+          background:
+            "#ede9fe",
+          border:
+            "#ddd6fe",
+          color:
+            "#6d28d9",
+          dot:
+            "#7c3aed",
+        };
+
+      case "collected":
+      case "disposed":
+      case "completed":
+        return {
+          background:
+            "#dcfce7",
+          border:
+            "#bbf7d0",
+          color:
+            "#15803d",
+          dot:
+            "#22c55e",
+        };
+
+      case "cancelled":
+      case "failed":
+        return {
+          background:
+            "#fee2e2",
+          border:
+            "#fecaca",
+          color:
+            "#b91c1c",
+          dot:
+            "#ef4444",
+        };
+
+      default:
+        return {
+          background:
+            "#f1f5f9",
+          border:
+            "#cbd5e1",
+          color:
+            "#475569",
+          dot:
+            "#64748b",
+        };
+    }
+  };
 
 
-  /* ==========================================================
-     UI
-  ========================================================== */
+  /*
+  |--------------------------------------------------------------------------
+  | RENDER
+  |--------------------------------------------------------------------------
+  */
 
   return (
-    <div className="min-h-screen bg-slate-50 p-5 md:p-8">
+    <div
+      style={{
+        minHeight:
+          "100vh",
+        background:
+          "#f8fafc",
+        padding:
+          "28px",
+        fontFamily:
+          "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        color:
+          "#0f172a",
+      }}
+    >
 
-      {/* ======================================================
+      {/* ============================================================
           HEADER
-      ====================================================== */}
+      ============================================================ */}
 
-      <div className="mb-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div
+        style={{
+          display:
+            "flex",
+          justifyContent:
+            "space-between",
+          alignItems:
+            "center",
+          marginBottom:
+            "24px",
+          gap:
+            "20px",
+          flexWrap:
+            "wrap",
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              margin:
+                0,
+              fontSize:
+                "28px",
+              fontWeight:
+                700,
+              color:
+                "#0f172a",
+            }}
+          >
+            Waste Management
+          </h1>
 
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">
-              Waste Management
-            </h1>
+          <p
+            style={{
+              margin:
+                "6px 0 0",
+              color:
+                "#64748b",
+              fontSize:
+                "14px",
+            }}
+          >
+            Complete waste register with
+            robot and department tracking
+          </p>
+        </div>
 
-            <p className="text-sm text-slate-500 mt-1">
-              Complete biomedical waste register
-              with robot tracking
-            </p>
+
+        <div
+          style={{
+            display:
+              "flex",
+            alignItems:
+              "center",
+            gap:
+              "12px",
+          }}
+        >
+          <div
+            style={{
+              display:
+                "flex",
+              alignItems:
+                "center",
+              gap:
+                "7px",
+              padding:
+                "8px 13px",
+              border:
+                "1px solid #bbf7d0",
+              background:
+                "#f0fdf4",
+              borderRadius:
+                "999px",
+              fontSize:
+                "13px",
+              color:
+                "#15803d",
+              fontWeight:
+                500,
+            }}
+          >
+            <span
+              style={{
+                width:
+                  "8px",
+                height:
+                  "8px",
+                borderRadius:
+                  "50%",
+                background:
+                  "#22c55e",
+              }}
+            />
+
+            Live updates
           </div>
 
 
-          <div className="flex items-center gap-3">
-
-            <div
-              className={`
-                px-3
-                py-2
-                rounded-full
-                text-xs
-                font-semibold
-                border
-                ${
-                  socketOnline
-                    ? "bg-green-50 text-green-700 border-green-200"
-                    : "bg-yellow-50 text-yellow-700 border-yellow-200"
-                }
-              `}
-            >
-              <span className="inline-block w-2 h-2 rounded-full bg-current mr-2" />
-
-              {socketOnline
-                ? "LIVE"
-                : "OFFLINE"}
-            </div>
-
-
-            <button
-              onClick={handleExport}
-              className="
-                px-4
-                py-2.5
-                bg-slate-900
-                text-white
-                rounded-lg
-                text-sm
-                font-semibold
-                hover:bg-slate-800
-                transition
-              "
-            >
-              Export CSV
-            </button>
-
-          </div>
-
+          <button
+            onClick={() =>
+              loadWaste(true)
+            }
+            disabled={loading}
+            style={{
+              border:
+                "1px solid #cbd5e1",
+              background:
+                "#ffffff",
+              borderRadius:
+                "9px",
+              padding:
+                "9px 15px",
+              cursor:
+                loading
+                  ? "not-allowed"
+                  : "pointer",
+              color:
+                "#334155",
+              fontWeight:
+                600,
+            }}
+          >
+            {loading
+              ? "Refreshing..."
+              : "Refresh"}
+          </button>
         </div>
       </div>
 
 
-      {/* ======================================================
+      {/* ============================================================
           ERROR
-      ====================================================== */}
+      ============================================================ */}
 
       {error && (
-        <div className="mb-5 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+        <div
+          style={{
+            marginBottom:
+              "20px",
+            padding:
+              "14px 16px",
+            background:
+              "#fef2f2",
+            border:
+              "1px solid #fecaca",
+            borderRadius:
+              "10px",
+            color:
+              "#b91c1c",
+            fontSize:
+              "14px",
+          }}
+        >
+          <strong>
+            Failed to load waste:
+          </strong>{" "}
           {error}
         </div>
       )}
 
 
-      {/* ======================================================
+      {/* ============================================================
           STAT CARDS
-      ====================================================== */}
+      ============================================================ */}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <div
+        style={{
+          display:
+            "grid",
+          gridTemplateColumns:
+            "repeat(4, minmax(0, 1fr))",
+          gap:
+            "16px",
+          marginBottom:
+            "24px",
+        }}
+      >
 
-        {/* Total */}
+        <StatCard
+          title="Total Waste"
+          value={stats.total}
+          subtitle="Registered waste records"
+          icon="📦"
+        />
 
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-500">
-                Total Waste
-              </p>
+        <StatCard
+          title="Pending"
+          value={stats.pending}
+          subtitle="Waiting for collection"
+          icon="⏳"
+        />
 
-              <p className="text-3xl font-bold text-slate-900 mt-2">
-                {statistics.total}
-              </p>
+        <StatCard
+          title="Robot Active"
+          value={stats.active}
+          subtitle="Currently being handled"
+          icon="🤖"
+        />
 
-              <p className="text-xs text-slate-500 mt-1">
-                Registered waste records
-              </p>
-            </div>
-
-            <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center text-xl">
-              📦
-            </div>
-          </div>
-        </div>
-
-
-        {/* Pending */}
-
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-500">
-                Pending
-              </p>
-
-              <p className="text-3xl font-bold text-slate-900 mt-2">
-                {statistics.pending}
-              </p>
-
-              <p className="text-xs text-slate-500 mt-1">
-                Waiting for collection
-              </p>
-            </div>
-
-            <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center text-xl">
-              ⏳
-            </div>
-          </div>
-        </div>
-
-
-        {/* Robot */}
-
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-500">
-                Robot Active
-              </p>
-
-              <p className="text-3xl font-bold text-slate-900 mt-2">
-                {statistics.activeRobots}
-              </p>
-
-              <p className="text-xs text-slate-500 mt-1">
-                Currently being handled
-              </p>
-            </div>
-
-            <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center text-xl">
-              🤖
-            </div>
-          </div>
-        </div>
-
-
-        {/* Disposed */}
-
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-500">
-                Disposed
-              </p>
-
-              <p className="text-3xl font-bold text-slate-900 mt-2">
-                {statistics.disposed}
-              </p>
-
-              <p className="text-xs text-slate-500 mt-1">
-                Successfully placed in bin
-              </p>
-            </div>
-
-            <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center text-xl">
-              ✅
-            </div>
-          </div>
-        </div>
+        <StatCard
+          title="Disposed"
+          value={stats.disposed}
+          subtitle="Successfully placed in bin"
+          icon="✅"
+        />
 
       </div>
 
 
-      {/* ======================================================
-          FILTERS
-      ====================================================== */}
+      {/* ============================================================
+          FILTER BAR
+      ============================================================ */}
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm mb-6">
+      <div
+        style={{
+          background:
+            "#ffffff",
+          border:
+            "1px solid #e2e8f0",
+          borderRadius:
+            "16px",
+          padding:
+            "18px",
+          marginBottom:
+            "24px",
+          boxShadow:
+            "0 1px 2px rgba(15,23,42,0.04)",
+        }}
+      >
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div
+          style={{
+            display:
+              "grid",
+            gridTemplateColumns:
+              "1.5fr 1fr 1fr",
+            gap:
+              "14px",
+          }}
+        >
 
-          {/* Search */}
+          {/* SEARCH */}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">
-              Search
+            <label
+              style={
+                labelStyle
+              }
+            >
+              SEARCH
             </label>
 
             <input
-              type="text"
               value={search}
               onChange={(e) =>
                 setSearch(
@@ -1168,150 +978,93 @@ export default function WasteRegister() {
                 )
               }
               placeholder="Search waste, robot, department..."
-              className="
-                w-full
-                px-4
-                py-3
-                bg-slate-50
-                border
-                border-slate-200
-                rounded-xl
-                outline-none
-                focus:ring-2
-                focus:ring-blue-200
-                focus:border-blue-400
-                text-sm
-              "
+              style={
+                inputStyle
+              }
             />
           </div>
 
 
-          {/* Status */}
+          {/* STATUS */}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">
-              Status
+            <label
+              style={
+                labelStyle
+              }
+            >
+              STATUS
             </label>
 
             <select
-              value={statusFilter}
+              value={
+                statusFilter
+              }
               onChange={(e) =>
                 setStatusFilter(
                   e.target.value
                 )
               }
-              className="
-                w-full
-                px-4
-                py-3
-                bg-slate-50
-                border
-                border-slate-200
-                rounded-xl
-                outline-none
-                text-sm
-              "
+              style={
+                inputStyle
+              }
             >
-              <option value="ALL">
-                All Status
-              </option>
-
-              <option value="pending">
-                Pending
-              </option>
-
-              <option value="confirmed">
-                Confirmed
-              </option>
-
-              <option value="dispatched">
-                Dispatched
-              </option>
-
-              <option value="moving_to_pickup">
-                Moving to Pickup
-              </option>
-
-              <option value="collecting">
-                Collecting
-              </option>
-
-              <option value="moving_to_bin">
-                Moving to Bin
-              </option>
-
-              <option value="depositing">
-                Depositing
-              </option>
-
-              <option value="collected">
-                Collected
-              </option>
-
-              <option value="disposed">
-                Disposed
-              </option>
-
-              <option value="returning">
-                Returning
-              </option>
-
-              <option value="completed">
-                Completed
-              </option>
-
-              <option value="failed">
-                Failed
-              </option>
+              {STATUS_OPTIONS.map(
+                (status) => (
+                  <option
+                    key={status}
+                    value={status}
+                  >
+                    {status === "ALL"
+                      ? "All Status"
+                      : formatStatus(
+                          status
+                        )}
+                  </option>
+                )
+              )}
             </select>
           </div>
 
 
-          {/* Bin */}
+          {/* BIN */}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">
-              Bin
+            <label
+              style={
+                labelStyle
+              }
+            >
+              BIN
             </label>
 
             <select
-              value={binFilter}
+              value={
+                binFilter
+              }
               onChange={(e) =>
                 setBinFilter(
                   e.target.value
                 )
               }
-              className="
-                w-full
-                px-4
-                py-3
-                bg-slate-50
-                border
-                border-slate-200
-                rounded-xl
-                outline-none
-                text-sm
-              "
+              style={
+                inputStyle
+              }
             >
-              <option value="ALL">
-                All Bins
-              </option>
-
-              <option value="yellow">
-                Yellow Bin
-              </option>
-
-              <option value="red">
-                Red Bin
-              </option>
-
-              <option value="blue">
-                Blue Bin
-              </option>
-
-              <option value="general">
-                General Bin
-              </option>
+              {BIN_OPTIONS.map(
+                (bin) => (
+                  <option
+                    key={bin}
+                    value={bin}
+                  >
+                    {bin === "ALL"
+                      ? "All Bins"
+                      : formatCategory(
+                          bin
+                        )}
+                  </option>
+                )
+              )}
             </select>
           </div>
 
@@ -1319,631 +1072,1189 @@ export default function WasteRegister() {
       </div>
 
 
-      {/* ======================================================
+      {/* ============================================================
           TABLE
-      ====================================================== */}
+      ============================================================ */}
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div
+        style={{
+          background:
+            "#ffffff",
+          border:
+            "1px solid #e2e8f0",
+          borderRadius:
+            "16px",
+          overflow:
+            "hidden",
+          boxShadow:
+            "0 1px 2px rgba(15,23,42,0.04)",
+        }}
+      >
 
-        {/* Table Header */}
+        {/* TABLE HEADER */}
 
-        <div className="px-5 py-5 border-b border-slate-200 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div
+          style={{
+            padding:
+              "20px",
+            borderBottom:
+              "1px solid #e2e8f0",
+            display:
+              "flex",
+            justifyContent:
+              "space-between",
+            alignItems:
+              "center",
+            gap:
+              "15px",
+          }}
+        >
 
           <div>
-            <h2 className="text-lg font-bold text-slate-900">
+            <h2
+              style={{
+                margin:
+                  0,
+                fontSize:
+                  "18px",
+                fontWeight:
+                  700,
+              }}
+            >
               Waste Records
             </h2>
 
-            <p className="text-sm text-slate-500 mt-1">
+            <p
+              style={{
+                margin:
+                  "5px 0 0",
+                fontSize:
+                  "13px",
+                color:
+                  "#64748b",
+              }}
+            >
               Showing{" "}
-              <span className="font-semibold text-slate-700">
-                {filteredRecords.length}
-              </span>{" "}
+              <strong>
+                {
+                  filteredRecords.length
+                }
+              </strong>{" "}
               of{" "}
-              <span className="font-semibold text-slate-700">
-                {normalizedRecords.length}
-              </span>{" "}
+              <strong>
+                {
+                  normalizedRecords.length
+                }
+              </strong>{" "}
               records
             </p>
           </div>
 
 
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <span className="w-2 h-2 bg-green-500 rounded-full" />
-
-            Live updates enabled
-          </div>
+          {lastUpdated && (
+            <div
+              style={{
+                fontSize:
+                  "12px",
+                color:
+                  "#94a3b8",
+              }}
+            >
+              Updated{" "}
+              {lastUpdated.toLocaleTimeString()}
+            </div>
+          )}
 
         </div>
 
 
-        {/* Empty */}
+        {/* TABLE */}
 
-        {filteredRecords.length === 0 ? (
-          <div className="py-20 text-center">
-
-            <div className="text-5xl mb-4">
-              🗑️
+        {loading &&
+        normalizedRecords.length ===
+          0 ? (
+          <div
+            style={{
+              padding:
+                "70px 20px",
+              textAlign:
+                "center",
+              color:
+                "#64748b",
+            }}
+          >
+            Loading waste records...
+          </div>
+        ) : filteredRecords.length ===
+          0 ? (
+          <div
+            style={{
+              padding:
+                "70px 20px",
+              textAlign:
+                "center",
+              color:
+                "#64748b",
+            }}
+          >
+            <div
+              style={{
+                fontSize:
+                  "40px",
+                marginBottom:
+                  "12px",
+              }}
+            >
+              📋
             </div>
 
-            <h3 className="font-semibold text-slate-800">
+            <div
+              style={{
+                fontWeight:
+                  600,
+                color:
+                  "#334155",
+                marginBottom:
+                  "5px",
+              }}
+            >
               No waste records found
-            </h3>
+            </div>
 
-            <p className="text-sm text-slate-500 mt-1">
-              Try changing your search or filters.
-            </p>
-
+            <div
+              style={{
+                fontSize:
+                  "13px",
+              }}
+            >
+              Try changing your search or
+              filters.
+            </div>
           </div>
         ) : (
+          <div
+            style={{
+              overflowX:
+                "auto",
+            }}
+          >
+            <table
+              style={{
+                width:
+                  "100%",
+                borderCollapse:
+                  "collapse",
+                minWidth:
+                  "1100px",
+              }}
+            >
 
-          <div className="overflow-x-auto">
+              <thead>
+                <tr
+                  style={{
+                    background:
+                      "#f8fafc",
+                    borderBottom:
+                      "1px solid #e2e8f0",
+                  }}
+                >
 
-            <table className="w-full min-w-[1100px]">
+                  <TableHeader>
+                    WASTE
+                  </TableHeader>
 
-              <thead className="bg-slate-50 border-b border-slate-200">
+                  <TableHeader>
+                    CATEGORY / BIN
+                  </TableHeader>
 
-                <tr>
+                  <TableHeader>
+                    DEPARTMENT
+                  </TableHeader>
 
-                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
-                    Waste
-                  </th>
+                  <TableHeader>
+                    WEIGHT
+                  </TableHeader>
 
-                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
-                    Category / Bin
-                  </th>
+                  <TableHeader>
+                    ROBOT
+                  </TableHeader>
 
-                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
-                    Department
-                  </th>
+                  <TableHeader>
+                    STATUS
+                  </TableHeader>
 
-                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
-                    Weight
-                  </th>
+                  <TableHeader>
+                    DATE
+                  </TableHeader>
 
-                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
-                    Robot
-                  </th>
-
-                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
-                    Status
-                  </th>
-
-                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
-                    Date
-                  </th>
-
-                  <th className="text-left px-5 py-4 text-xs font-bold text-slate-500 uppercase">
-                    Action
-                  </th>
+                  <TableHeader>
+                    ACTION
+                  </TableHeader>
 
                 </tr>
-
               </thead>
 
 
-              <tbody className="divide-y divide-slate-100">
-
+              <tbody>
                 {filteredRecords.map(
-                  (record, index) => (
+                  (record, index) => {
+                    const binStyle =
+                      getBinStyle(
+                        record.category
+                      );
 
-                    <tr
-                      key={
-                        record._id ||
-                        record.wasteId ||
-                        `${record.displayWasteId}-${index}`
-                      }
-                      className="hover:bg-slate-50 transition"
-                    >
+                    const statusStyle =
+                      getStatusStyle(
+                        record.status
+                      );
 
-                      {/* ====================================
-                          WASTE
-                      ==================================== */}
+                    return (
+                      <tr
+                        key={
+                          record._id ||
+                          record.wasteId ||
+                          `waste-${index}`
+                        }
+                        style={{
+                          borderBottom:
+                            "1px solid #f1f5f9",
+                        }}
+                      >
 
-                      <td className="px-5 py-5">
+                        {/* WASTE */}
 
-                        <div className="flex items-center gap-3">
-
-                          <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center text-xl">
-                            🗑️
-                          </div>
-
-                          <div>
-
-                            <p className="font-semibold text-slate-900">
-                              {record.itemType ||
-                                "Biomedical Waste"}
-                            </p>
-
-                            <p className="text-xs text-slate-400 mt-1">
-                              ID:{" "}
-                              {record.displayWasteId}
-                            </p>
-
-                          </div>
-
-                        </div>
-
-                      </td>
-
-
-                      {/* ====================================
-                          CATEGORY
-                      ==================================== */}
-
-                      <td className="px-5 py-5">
-
-                        <BinBadge
-                          category={
-                            record.displayCategory
+                        <td
+                          style={
+                            cellStyle
                           }
-                        />
+                        >
+                          <div
+                            style={{
+                              display:
+                                "flex",
+                              alignItems:
+                                "center",
+                              gap:
+                                "12px",
+                            }}
+                          >
 
-                        <p className="text-xs text-slate-400 mt-1">
-                          AI confidence:{" "}
-                          <span className="font-medium">
-                            {
-                              record.displayConfidence
-                            }
-                            %
-                          </span>
-                        </p>
-
-                      </td>
-
-
-                      {/* ====================================
-                          DEPARTMENT
-                      ==================================== */}
-
-                      <td className="px-5 py-5">
-
-                        <div className="flex items-center gap-2">
-
-                          <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center">
-                            🏥
-                          </div>
-
-                          <div>
-
-                            <p
-                              className={`
-                                font-semibold
-                                text-sm
-                                ${
-                                  record.displayDepartment ===
-                                  "Not assigned"
-                                    ? "text-slate-400"
-                                    : "text-slate-800"
-                                }
-                              `}
+                            <div
+                              style={{
+                                width:
+                                  "44px",
+                                height:
+                                  "44px",
+                                borderRadius:
+                                  "11px",
+                                background:
+                                  "#f1f5f9",
+                                display:
+                                  "flex",
+                                alignItems:
+                                  "center",
+                                justifyContent:
+                                  "center",
+                                fontSize:
+                                  "21px",
+                              }}
                             >
-                              {
-                                record.displayDepartment
-                              }
-                            </p>
+                              🗑️
+                            </div>
 
-                            <p className="text-xs text-slate-400">
-                              Pickup location
-                            </p>
+                            <div>
+                              <div
+                                style={{
+                                  fontWeight:
+                                    700,
+                                  fontSize:
+                                    "15px",
+                                  color:
+                                    "#0f172a",
+                                }}
+                              >
+                                {record.itemType ||
+                                  "Biomedical Waste"}
+                              </div>
+
+                              <div
+                                style={{
+                                  marginTop:
+                                    "4px",
+                                  fontSize:
+                                    "12px",
+                                  color:
+                                    "#94a3b8",
+                                }}
+                              >
+                                ID:{" "}
+                                {record.wasteId ||
+                                  "—"}
+                              </div>
+                            </div>
 
                           </div>
-
-                        </div>
-
-                      </td>
+                        </td>
 
 
-                      {/* ====================================
-                          WEIGHT
-                      ==================================== */}
+                        {/* CATEGORY */}
 
-                      <td className="px-5 py-5">
+                        <td
+                          style={
+                            cellStyle
+                          }
+                        >
+                          <div
+                            style={{
+                              display:
+                                "inline-flex",
+                              alignItems:
+                                "center",
+                              gap:
+                                "8px",
+                              padding:
+                                "7px 10px",
+                              background:
+                                binStyle.background,
+                              border:
+                                `1px solid ${binStyle.border}`,
+                              borderRadius:
+                                "8px",
+                              color:
+                                binStyle.text,
+                              fontSize:
+                                "12px",
+                              fontWeight:
+                                700,
+                            }}
+                          >
+                            <span
+                              style={{
+                                width:
+                                  "9px",
+                                height:
+                                  "9px",
+                                borderRadius:
+                                  "50%",
+                                background:
+                                  binStyle.dot,
+                              }}
+                            />
 
-                        <span className="font-semibold text-slate-800">
-                          {
-                            record.displayWeight
-                          }{" "}
-                          kg
-                        </span>
-
-                      </td>
-
-
-                      {/* ====================================
-                          ROBOT
-                      ==================================== */}
-
-                      <td className="px-5 py-5">
-
-                        <div className="flex items-center gap-2">
+                            {formatCategory(
+                              record.category
+                            )}
+                          </div>
 
                           <div
-                            className={`
-                              w-9
-                              h-9
-                              rounded-lg
-                              flex
-                              items-center
-                              justify-center
-                              ${
-                                record.displayRobot !==
-                                "Not assigned"
-                                  ? "bg-purple-50"
-                                  : "bg-slate-100"
-                              }
-                            `}
+                            style={{
+                              marginTop:
+                                "5px",
+                              color:
+                                "#94a3b8",
+                              fontSize:
+                                "11px",
+                            }}
                           >
-                            🤖
+                            AI confidence:{" "}
+                            {formatConfidence(
+                              record.confidence
+                            )}
                           </div>
-
-                          <div>
-
-                            <p
-                              className={`
-                                text-sm
-                                font-semibold
-                                ${
-                                  record.displayRobot !==
-                                  "Not assigned"
-                                    ? "text-slate-800"
-                                    : "text-slate-400"
-                                }
-                              `}
-                            >
-                              {
-                                record.displayRobot
-                              }
-                            </p>
-
-                            <p className="text-xs text-slate-400">
-                              Assigned robot
-                            </p>
-
-                          </div>
-
-                        </div>
-
-                      </td>
+                        </td>
 
 
-                      {/* ====================================
-                          STATUS
-                      ==================================== */}
+                        {/* DEPARTMENT */}
 
-                      <td className="px-5 py-5">
-
-                        <StatusBadge
-                          status={
-                            record.displayStatus
+                        <td
+                          style={
+                            cellStyle
                           }
-                        />
-
-                      </td>
-
-
-                      {/* ====================================
-                          DATE
-                      ==================================== */}
-
-                      <td className="px-5 py-5">
-
-                        <span className="text-sm text-slate-600 whitespace-nowrap">
-                          {formatDate(
-                            record.displayDate
-                          )}
-                        </span>
-
-                      </td>
-
-
-                      {/* ====================================
-                          ACTION
-                      ==================================== */}
-
-                      <td className="px-5 py-5">
-
-                        <button
-                          onClick={() =>
-                            setSelectedWaste(
-                              record
-                            )
-                          }
-                          className="
-                            px-4
-                            py-2
-                            border
-                            border-slate-200
-                            rounded-lg
-                            text-sm
-                            font-semibold
-                            text-slate-700
-                            hover:bg-slate-50
-                            transition
-                          "
                         >
-                          View
-                        </button>
+                          <div
+                            style={{
+                              display:
+                                "inline-flex",
+                              alignItems:
+                                "center",
+                              gap:
+                                "8px",
+                              padding:
+                                "8px 11px",
+                              background:
+                                "#f1f5f9",
+                              borderRadius:
+                                "9px",
+                              color:
+                                "#334155",
+                              fontWeight:
+                                700,
+                              fontSize:
+                                "13px",
+                            }}
+                          >
+                            🏥
 
-                      </td>
+                            <span>
+                              {
+                                record.department
+                              }
+                            </span>
+                          </div>
+                        </td>
 
-                    </tr>
 
-                  )
+                        {/* WEIGHT */}
+
+                        <td
+                          style={
+                            cellStyle
+                          }
+                        >
+                          <span
+                            style={{
+                              fontWeight:
+                                600,
+                              color:
+                                "#0f172a",
+                            }}
+                          >
+                            {record.weight}{" "}
+                            kg
+                          </span>
+                        </td>
+
+
+                        {/* ROBOT */}
+
+                        <td
+                          style={
+                            cellStyle
+                          }
+                        >
+                          {record.robotId &&
+                          record.robotId !==
+                            "Not assigned" ? (
+                            <div
+                              style={{
+                                display:
+                                  "inline-flex",
+                                alignItems:
+                                  "center",
+                                gap:
+                                  "8px",
+                                padding:
+                                  "8px 11px",
+                                background:
+                                  "#eff6ff",
+                                border:
+                                  "1px solid #bfdbfe",
+                                borderRadius:
+                                  "9px",
+                                color:
+                                  "#1d4ed8",
+                                fontSize:
+                                  "12px",
+                                fontWeight:
+                                  700,
+                              }}
+                            >
+                              🤖
+
+                              <span>
+                                {
+                                  record.robotId
+                                }
+                              </span>
+                            </div>
+                          ) : (
+                            <span
+                              style={{
+                                color:
+                                  "#94a3b8",
+                                fontSize:
+                                  "13px",
+                              }}
+                            >
+                              Not assigned
+                            </span>
+                          )}
+                        </td>
+
+
+                        {/* STATUS */}
+
+                        <td
+                          style={
+                            cellStyle
+                          }
+                        >
+                          <div
+                            style={{
+                              display:
+                                "inline-flex",
+                              alignItems:
+                                "center",
+                              gap:
+                                "7px",
+                              padding:
+                                "7px 11px",
+                              background:
+                                statusStyle.background,
+                              border:
+                                `1px solid ${statusStyle.border}`,
+                              color:
+                                statusStyle.color,
+                              borderRadius:
+                                "999px",
+                              fontSize:
+                                "12px",
+                              fontWeight:
+                                700,
+                              whiteSpace:
+                                "nowrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                width:
+                                  "8px",
+                                height:
+                                  "8px",
+                                borderRadius:
+                                  "50%",
+                                background:
+                                  statusStyle.dot,
+                              }}
+                            />
+
+                            {formatStatus(
+                              record.status
+                            )}
+                          </div>
+                        </td>
+
+
+                        {/* DATE */}
+
+                        <td
+                          style={{
+                            ...cellStyle,
+                            color:
+                              "#64748b",
+                            fontSize:
+                              "12px",
+                            whiteSpace:
+                              "nowrap",
+                          }}
+                        >
+                          {formatDate(
+                            record.createdAt
+                          )}
+                        </td>
+
+
+                        {/* ACTION */}
+
+                        <td
+                          style={
+                            cellStyle
+                          }
+                        >
+                          <button
+                            onClick={() =>
+                              setSelectedWaste(
+                                record
+                              )
+                            }
+                            style={{
+                              padding:
+                                "8px 14px",
+                              background:
+                                "#ffffff",
+                              border:
+                                "1px solid #dbe2ea",
+                              borderRadius:
+                                "9px",
+                              color:
+                                "#334155",
+                              fontWeight:
+                                600,
+                              cursor:
+                                "pointer",
+                            }}
+                          >
+                            View
+                          </button>
+                        </td>
+
+                      </tr>
+                    );
+                  }
                 )}
-
               </tbody>
 
             </table>
-
           </div>
-
         )}
 
       </div>
 
 
-      {/* ======================================================
-          DETAILS MODAL
-      ====================================================== */}
+      {/* ============================================================
+          DETAIL MODAL
+      ============================================================ */}
 
       {selectedWaste && (
         <div
-          className="
-            fixed
-            inset-0
-            z-50
-            bg-black/40
-            flex
-            items-center
-            justify-center
-            p-5
-          "
           onClick={() =>
             setSelectedWaste(null)
           }
+          style={{
+            position:
+              "fixed",
+            inset:
+              0,
+            background:
+              "rgba(15,23,42,0.45)",
+            display:
+              "flex",
+            alignItems:
+              "center",
+            justifyContent:
+              "center",
+            padding:
+              "20px",
+            zIndex:
+              1000,
+          }}
         >
 
           <div
-            className="
-              bg-white
-              rounded-2xl
-              shadow-2xl
-              w-full
-              max-w-2xl
-              max-h-[90vh]
-              overflow-y-auto
-            "
             onClick={(e) =>
               e.stopPropagation()
             }
+            style={{
+              width:
+                "min(600px, 100%)",
+              maxHeight:
+                "85vh",
+              overflowY:
+                "auto",
+              background:
+                "#ffffff",
+              borderRadius:
+                "18px",
+              boxShadow:
+                "0 25px 60px rgba(15,23,42,0.25)",
+              padding:
+                "24px",
+            }}
           >
 
-            {/* Modal header */}
-
-            <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+            <div
+              style={{
+                display:
+                  "flex",
+                justifyContent:
+                  "space-between",
+                alignItems:
+                  "center",
+                marginBottom:
+                  "22px",
+              }}
+            >
 
               <div>
-
-                <h2 className="text-xl font-bold text-slate-900">
+                <h2
+                  style={{
+                    margin:
+                      0,
+                    fontSize:
+                      "21px",
+                  }}
+                >
                   Waste Details
                 </h2>
 
-                <p className="text-sm text-slate-500 mt-1">
+                <p
+                  style={{
+                    margin:
+                      "5px 0 0",
+                    color:
+                      "#64748b",
+                    fontSize:
+                      "13px",
+                  }}
+                >
                   {
-                    selectedWaste.displayWasteId
+                    selectedWaste.wasteId
                   }
                 </p>
-
               </div>
 
 
               <button
                 onClick={() =>
-                  setSelectedWaste(null)
+                  setSelectedWaste(
+                    null
+                  )
                 }
-                className="
-                  w-9
-                  h-9
-                  rounded-lg
-                  bg-slate-100
-                  hover:bg-slate-200
-                  text-slate-600
-                "
+                style={{
+                  width:
+                    "34px",
+                  height:
+                    "34px",
+                  border:
+                    "1px solid #e2e8f0",
+                  borderRadius:
+                    "8px",
+                  background:
+                    "#ffffff",
+                  cursor:
+                    "pointer",
+                  fontSize:
+                    "18px",
+                }}
               >
-                ✕
+                ×
               </button>
 
             </div>
 
 
-            {/* Modal content */}
+            <div
+              style={{
+                display:
+                  "grid",
+                gridTemplateColumns:
+                  "1fr 1fr",
+                gap:
+                  "12px",
+              }}
+            >
 
-            <div className="p-6 space-y-5">
+              <DetailItem
+                label="Waste ID"
+                value={
+                  selectedWaste.wasteId ||
+                  "—"
+                }
+              />
 
-              {/* Category */}
+              <DetailItem
+                label="Item Type"
+                value={
+                  selectedWaste.itemType ||
+                  "Biomedical Waste"
+                }
+              />
 
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase mb-2">
-                  Waste Category
-                </p>
+              <DetailItem
+                label="Category / Bin"
+                value={formatCategory(
+                  selectedWaste.category
+                )}
+              />
 
-                <BinBadge
-                  category={
-                    selectedWaste.displayCategory
-                  }
-                />
-              </div>
+              <DetailItem
+                label="AI Confidence"
+                value={formatConfidence(
+                  selectedWaste.confidence
+                )}
+              />
 
+              <DetailItem
+                label="Department"
+                value={
+                  selectedWaste.department ||
+                  "—"
+                }
+              />
 
-              {/* Department + Robot */}
+              <DetailItem
+                label="Assigned Robot"
+                value={
+                  selectedWaste.robotId ||
+                  "Not assigned"
+                }
+              />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <DetailItem
+                label="Weight"
+                value={`${selectedWaste.weight || 0} kg`}
+              />
 
-                <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
+              <DetailItem
+                label="Status"
+                value={formatStatus(
+                  selectedWaste.status
+                )}
+              />
 
-                  <p className="text-xs font-semibold text-blue-500 uppercase">
-                    Department
-                  </p>
+              <DetailItem
+                label="Created At"
+                value={formatDate(
+                  selectedWaste.createdAt
+                )}
+              />
 
-                  <p className="text-lg font-bold text-blue-900 mt-2">
-                    {
-                      selectedWaste.displayDepartment
-                    }
-                  </p>
-
-                </div>
-
-
-                <div className="p-4 rounded-xl bg-purple-50 border border-purple-100">
-
-                  <p className="text-xs font-semibold text-purple-500 uppercase">
-                    Assigned Robot
-                  </p>
-
-                  <p className="text-lg font-bold text-purple-900 mt-2">
-                    {
-                      selectedWaste.displayRobot
-                    }
-                  </p>
-
-                </div>
-
-              </div>
-
-
-              {/* Status */}
-
-              <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200">
-
-                <div>
-
-                  <p className="text-xs font-semibold text-slate-400 uppercase">
-                    Current Status
-                  </p>
-
-                  <div className="mt-2">
-                    <StatusBadge
-                      status={
-                        selectedWaste.displayStatus
-                      }
-                    />
-                  </div>
-
-                </div>
-
-
-                <div className="text-right">
-
-                  <p className="text-xs font-semibold text-slate-400 uppercase">
-                    Weight
-                  </p>
-
-                  <p className="text-lg font-bold text-slate-900 mt-2">
-                    {
-                      selectedWaste.displayWeight
-                    }{" "}
-                    kg
-                  </p>
-
-                </div>
-
-              </div>
-
-
-              {/* Other information */}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                <div>
-
-                  <p className="text-xs text-slate-400">
-                    Waste ID
-                  </p>
-
-                  <p className="font-semibold text-slate-800 mt-1">
-                    {
-                      selectedWaste.displayWasteId
-                    }
-                  </p>
-
-                </div>
-
-
-                <div>
-
-                  <p className="text-xs text-slate-400">
-                    Item Type
-                  </p>
-
-                  <p className="font-semibold text-slate-800 mt-1">
-                    {
-                      selectedWaste.itemType ||
-                      "Biomedical Waste"
-                    }
-                  </p>
-
-                </div>
-
-
-                <div>
-
-                  <p className="text-xs text-slate-400">
-                    AI Confidence
-                  </p>
-
-                  <p className="font-semibold text-slate-800 mt-1">
-                    {
-                      selectedWaste.displayConfidence
-                    }
-                    %
-                  </p>
-
-                </div>
-
-
-                <div>
-
-                  <p className="text-xs text-slate-400">
-                    Created
-                  </p>
-
-                  <p className="font-semibold text-slate-800 mt-1">
-                    {formatDate(
-                      selectedWaste.createdAt
-                    )}
-                  </p>
-
-                </div>
-
-              </div>
-
-
-              {/* Raw debugging information */}
-
-              <details className="border border-slate-200 rounded-xl">
-
-                <summary className="cursor-pointer p-4 text-sm font-semibold text-slate-600">
-                  Technical Record
-                </summary>
-
-                <pre className="p-4 bg-slate-950 text-green-300 text-xs overflow-auto rounded-b-xl">
-                  {JSON.stringify(
-                    selectedWaste,
-                    null,
-                    2
-                  )}
-                </pre>
-
-              </details>
+              <DetailItem
+                label="Collected At"
+                value={formatDate(
+                  selectedWaste.collectedAt
+                )}
+              />
 
             </div>
 
-          </div>
 
+            <div
+              style={{
+                marginTop:
+                  "18px",
+                padding:
+                  "15px",
+                background:
+                  "#f8fafc",
+                borderRadius:
+                  "11px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize:
+                    "12px",
+                  color:
+                    "#64748b",
+                  marginBottom:
+                    "5px",
+                }}
+              >
+                Source Location
+              </div>
+
+              <div
+                style={{
+                  fontWeight:
+                    700,
+                  color:
+                    "#334155",
+                }}
+              >
+                {selectedWaste.sourceLocation ||
+                  selectedWaste.department ||
+                  "—"}
+              </div>
+            </div>
+
+
+            <div
+              style={{
+                marginTop:
+                  "18px",
+                display:
+                  "flex",
+                justifyContent:
+                  "flex-end",
+              }}
+            >
+              <button
+                onClick={() =>
+                  setSelectedWaste(
+                    null
+                  )
+                }
+                style={{
+                  padding:
+                    "10px 18px",
+                  background:
+                    "#0f172a",
+                  color:
+                    "#ffffff",
+                  border:
+                    "none",
+                  borderRadius:
+                    "9px",
+                  cursor:
+                    "pointer",
+                  fontWeight:
+                    600,
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+          </div>
         </div>
       )}
 
     </div>
   );
 }
+
+
+/*
+|--------------------------------------------------------------------------
+| STAT CARD
+|--------------------------------------------------------------------------
+*/
+
+function StatCard({
+  title,
+  value,
+  subtitle,
+  icon,
+}) {
+  return (
+    <div
+      style={{
+        background:
+          "#ffffff",
+        border:
+          "1px solid #e2e8f0",
+        borderRadius:
+          "16px",
+        padding:
+          "20px",
+        boxShadow:
+          "0 1px 2px rgba(15,23,42,0.04)",
+      }}
+    >
+
+      <div
+        style={{
+          display:
+            "flex",
+          justifyContent:
+            "space-between",
+          alignItems:
+            "flex-start",
+        }}
+      >
+
+        <div>
+          <div
+            style={{
+              color:
+                "#64748b",
+              fontSize:
+                "14px",
+              marginBottom:
+                "7px",
+            }}
+          >
+            {title}
+          </div>
+
+          <div
+            style={{
+              fontSize:
+                "32px",
+              lineHeight:
+                1,
+              fontWeight:
+                750,
+              color:
+                "#0f172a",
+            }}
+          >
+            {value}
+          </div>
+
+          <div
+            style={{
+              marginTop:
+                "9px",
+              color:
+                "#64748b",
+              fontSize:
+                "12px",
+            }}
+          >
+            {subtitle}
+          </div>
+        </div>
+
+
+        <div
+          style={{
+            width:
+              "44px",
+            height:
+              "44px",
+            borderRadius:
+              "12px",
+            background:
+              "#f1f5f9",
+            display:
+              "flex",
+            alignItems:
+              "center",
+            justifyContent:
+              "center",
+            fontSize:
+              "22px",
+          }}
+        >
+          {icon}
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| TABLE HEADER
+|--------------------------------------------------------------------------
+*/
+
+function TableHeader({
+  children,
+}) {
+  return (
+    <th
+      style={{
+        padding:
+          "14px 18px",
+        textAlign:
+          "left",
+        color:
+          "#64748b",
+        fontSize:
+          "11px",
+        fontWeight:
+          700,
+        letterSpacing:
+          "0.04em",
+        whiteSpace:
+          "nowrap",
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| DETAIL ITEM
+|--------------------------------------------------------------------------
+*/
+
+function DetailItem({
+  label,
+  value,
+}) {
+  return (
+    <div
+      style={{
+        padding:
+          "13px",
+        background:
+          "#f8fafc",
+        border:
+          "1px solid #eef2f7",
+        borderRadius:
+          "10px",
+      }}
+    >
+      <div
+        style={{
+          color:
+            "#64748b",
+          fontSize:
+            "11px",
+          marginBottom:
+            "5px",
+        }}
+      >
+        {label}
+      </div>
+
+      <div
+        style={{
+          color:
+            "#0f172a",
+          fontSize:
+            "13px",
+          fontWeight:
+            700,
+          wordBreak:
+            "break-word",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| STYLES
+|--------------------------------------------------------------------------
+*/
+
+const labelStyle = {
+  display:
+    "block",
+  marginBottom:
+    "7px",
+  fontSize:
+    "11px",
+  fontWeight:
+    700,
+  color:
+    "#64748b",
+  letterSpacing:
+    "0.04em",
+};
+
+
+const inputStyle = {
+  width:
+    "100%",
+  height:
+    "42px",
+  boxSizing:
+    "border-box",
+  border:
+    "1px solid #dbe2ea",
+  borderRadius:
+    "10px",
+  padding:
+    "0 13px",
+  background:
+    "#f8fafc",
+  color:
+    "#334155",
+  outline:
+    "none",
+  fontSize:
+    "13px",
+};
+
+
+const cellStyle = {
+  padding:
+    "16px 18px",
+  verticalAlign:
+    "middle",
+};
+
+
+/*
+|--------------------------------------------------------------------------
+| EXPORT
+|--------------------------------------------------------------------------
+*/
+
+export default WasteRegister;
