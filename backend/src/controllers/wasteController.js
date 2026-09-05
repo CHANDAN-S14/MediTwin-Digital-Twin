@@ -10,41 +10,29 @@ import asyncHandler from "../utils/asyncHandler.js";
 import { formatWasteId } from "../utils/ids.js";
 
 import { recordAudit } from "../services/auditService.js";
+
 import {
   emitToHospital,
   EVENTS,
 } from "../services/socketService.js";
 
+
 /*
 |--------------------------------------------------------------------------
 | DEMO HOSPITAL
 |--------------------------------------------------------------------------
-|
-| Because authentication is disabled for the demo workflow, we use one
-| fixed hospital identifier.
-|
-| IMPORTANT:
-| This must match the hospitalId expected by your Waste model.
-|
-|--------------------------------------------------------------------------
 */
 
-const DEFAULT_HOSPITAL_ID = "DEFAULT_HOSPITAL";
+const DEFAULT_HOSPITAL_ID =
+  "DEFAULT_HOSPITAL";
+
 
 /*
 |--------------------------------------------------------------------------
-| Helpers
+| HELPERS
 |--------------------------------------------------------------------------
 */
 
-/*
- * Get hospital ID.
- *
- * If authentication is enabled later and req.hospitalId exists,
- * use that value.
- *
- * Otherwise use DEFAULT_HOSPITAL.
- */
 const getHospitalId = (req) => {
   return (
     req?.hospitalId ||
@@ -56,21 +44,12 @@ const getHospitalId = (req) => {
 
 /*
 |--------------------------------------------------------------------------
-| Safe audit helper
-|--------------------------------------------------------------------------
-|
-| Audit logging should never break the actual waste operation.
-|
-| This is especially useful in demo mode because there may be no
-| authenticated req.user.
+| SAFE AUDIT
 |--------------------------------------------------------------------------
 */
 
 const safeAudit = async (payload) => {
   try {
-    /*
-     * If there is no actor, create a simple demo actor.
-     */
     const actor =
       payload.actor || {
         _id: null,
@@ -93,57 +72,93 @@ const safeAudit = async (payload) => {
 
 /*
 |--------------------------------------------------------------------------
-| Find waste using either Mongo ObjectId or MW-xxxx wasteId
+| FIND WASTE BY MONGO ID OR MW ID
 |--------------------------------------------------------------------------
 */
 
-const byAnyId = (id, hospitalId) => {
-  const value = String(id || "").trim();
+const byAnyId = (
+  id,
+  hospitalId
+) => {
+  const value = String(
+    id || ""
+  ).trim();
 
-  /*
-   * Mongo ObjectId
-   */
-  if (mongoose.Types.ObjectId.isValid(value)) {
-    return {
+  if (
+    mongoose.Types.ObjectId.isValid(
+      value
+    )
+  ) {
+    const filter = {
       _id: value,
-      hospitalId,
     };
+
+    if (
+      hospitalId &&
+      hospitalId !==
+        DEFAULT_HOSPITAL_ID &&
+      mongoose.Types.ObjectId.isValid(
+        hospitalId
+      )
+    ) {
+      filter.hospitalId =
+        hospitalId;
+    }
+
+    return filter;
   }
 
-  /*
-   * Custom waste ID
-   *
-   * Example:
-   * MW-0001
-   * MW-0042
-   */
-  return {
-    wasteId: value.toUpperCase(),
-    hospitalId,
+  const filter = {
+    wasteId:
+      value.toUpperCase(),
   };
+
+  if (
+    hospitalId &&
+    hospitalId !==
+      DEFAULT_HOSPITAL_ID &&
+    mongoose.Types.ObjectId.isValid(
+      hospitalId
+    )
+  ) {
+    filter.hospitalId =
+      hospitalId;
+  }
+
+  return filter;
 };
 
 
 /*
 |--------------------------------------------------------------------------
-| Normalize category
+| NORMALIZE CATEGORY
 |--------------------------------------------------------------------------
 */
 
-const normalizeCategory = (category) => {
-  const value = String(category || "")
+const normalizeCategory = (
+  category
+) => {
+  const value = String(
+    category || ""
+  )
     .trim()
     .toLowerCase();
 
-  if (value.includes("yellow")) {
+  if (
+    value.includes("yellow")
+  ) {
     return "yellow";
   }
 
-  if (value.includes("red")) {
+  if (
+    value.includes("red")
+  ) {
     return "red";
   }
 
-  if (value.includes("blue")) {
+  if (
+    value.includes("blue")
+  ) {
     return "blue";
   }
 
@@ -161,437 +176,586 @@ const normalizeCategory = (category) => {
 
 /*
 |--------------------------------------------------------------------------
-| GET /api/v1/waste
+| NORMALIZE DEPARTMENT
 |--------------------------------------------------------------------------
 */
 
-export const listWaste = asyncHandler(async (req, res) => {
-  const {
-    page = 1,
-    limit = 50,
-    status,
-    category,
-    department,
-    search,
-    hospitalId,
-  } = req.query;
+const normalizeDepartment = (
+  department
+) => {
+  const value = String(
+    department || "GENERAL"
+  )
+    .trim()
+    .toUpperCase();
 
-  /*
-   * Use query hospitalId only if it is a valid Mongo ObjectId.
-   *
-   * Otherwise use the demo hospital.
-   */
-  let activeHospitalId = getHospitalId(req);
+  const validDepartments = [
+    "OT",
+    "ICU",
+    "WARD",
+    "GENERAL",
+    "EMERGENCY",
+    "PHARMACY",
+    "LABORATORY",
+  ];
 
-  if (
-    hospitalId &&
-    hospitalId !== DEFAULT_HOSPITAL_ID &&
-    mongoose.Types.ObjectId.isValid(hospitalId)
-  ) {
-    activeHospitalId = hospitalId;
-  }
-
-  /*
-   * Build filter.
-   */
-  const filter = {};
-
-  /*
-   * Only add hospital filter if the value is a valid Mongo ObjectId.
-   *
-   * This is important because:
-   *
-   * DEFAULT_HOSPITAL
-   *
-   * is not a Mongo ObjectId.
-   */
-  if (
-    activeHospitalId &&
-    activeHospitalId !== DEFAULT_HOSPITAL_ID &&
-    mongoose.Types.ObjectId.isValid(activeHospitalId)
-  ) {
-    filter.hospitalId = activeHospitalId;
-  }
-
-  /*
-   * Status filter.
-   */
-  if (status) {
-    filter.status = String(status).toLowerCase();
-  }
-
-  /*
-   * Category filter.
-   */
-  if (category && category !== "ALL") {
-    filter.category = normalizeCategory(category);
-  }
-
-  /*
-   * Department filter.
-   */
-  if (department) {
-    filter.sourceLocation = {
-      $regex: String(department),
-      $options: "i",
-    };
-  }
-
-  /*
-   * Search.
-   */
-  if (search) {
-    const searchValue = String(search);
-
-    filter.$or = [
-      {
-        category: {
-          $regex: searchValue,
-          $options: "i",
-        },
-      },
-      {
-        sourceLocation: {
-          $regex: searchValue,
-          $options: "i",
-        },
-      },
-      {
-        wasteId: {
-          $regex: searchValue,
-          $options: "i",
-        },
-      },
-      {
-        robotId: {
-          $regex: searchValue,
-          $options: "i",
-        },
-      },
-      {
-        itemType: {
-          $regex: searchValue,
-          $options: "i",
-        },
-      },
-    ];
-  }
-
-  const pageNumber = Math.max(
-    1,
-    Number(page) || 1
-  );
-
-  const limitNumber = Math.min(
-    100,
-    Math.max(1, Number(limit) || 50)
-  );
-
-  const skip =
-    (pageNumber - 1) * limitNumber;
-
-  /*
-   * Get records.
-   */
-  const [records, total] =
-    await Promise.all([
-      Waste.find(filter)
-        .sort({
-          createdAt: -1,
-        })
-        .skip(skip)
-        .limit(limitNumber)
-        .lean(),
-
-      Waste.countDocuments(filter),
-    ]);
-
-  res.json({
-    success: true,
-    data: records,
-    meta: {
-      page: pageNumber,
-      limit: limitNumber,
-      total,
-      pages:
-        total === 0
-          ? 0
-          : Math.ceil(
-              total / limitNumber
-            ),
-    },
-  });
-});
+  return validDepartments.includes(
+    value
+  )
+    ? value
+    : "GENERAL";
+};
 
 
 /*
 |--------------------------------------------------------------------------
-| GET /api/v1/waste/:id
+| GET WASTE
 |--------------------------------------------------------------------------
 */
 
-export const getWaste = asyncHandler(
-  async (req, res) => {
-    const hospitalId =
-      getHospitalId(req);
+export const listWaste =
+  asyncHandler(
+    async (req, res) => {
+      const {
+        page = 1,
+        limit = 50,
+        status,
+        category,
+        department,
+        search,
+        hospitalId,
+      } = req.query;
 
-    const item =
-      await Waste.findOne(
-        byAnyId(
-          req.params.id,
-          hospitalId
-        )
-      ).populate(
-        "taskId",
-        "taskId route transitions status"
-      );
+      let activeHospitalId =
+        getHospitalId(req);
 
-    if (!item) {
-      throw ApiError.notFound(
-        `No waste record ${req.params.id}`
-      );
-    }
-
-    res.json({
-      success: true,
-      data: item,
-    });
-  }
-);
-
-
-/*
-|--------------------------------------------------------------------------
-| POST /api/v1/waste
-|--------------------------------------------------------------------------
-|
-| Used when creating a waste record manually or from Scanner.
-|--------------------------------------------------------------------------
-*/
-
-export const createWaste = asyncHandler(
-  async (req, res) => {
-    const {
-      category,
-      itemType,
-      weight,
-      sourceLocation,
-      department,
-      robotId,
-      compartmentId,
-      confidence,
-      originalCategory,
-      status,
-      collectedAt,
-      taskId,
-    } = req.body;
-
-    /*
-     * Hospital.
-     */
-    const hospitalId =
-      getHospitalId(req);
-
-    /*
-     * Normalize category.
-     */
-    const normalizedCategory =
-      normalizeCategory(category);
-
-    /*
-     * Validate category.
-     */
-    if (
-      !WASTE_CATEGORIES.includes(
-        normalizedCategory
-      )
-    ) {
-      throw ApiError.badRequest(
-        `Category must be one of: ${WASTE_CATEGORIES.join(
-          ", "
-        )}`
-      );
-    }
-
-    /*
-     * Department/source location.
-     */
-    const source =
-      sourceLocation ||
-      department;
-
-    if (!source) {
-      throw ApiError.badRequest(
-        "Please provide the source department."
-      );
-    }
-
-    /*
-     * Weight.
-     */
-    const numericWeight =
-      Number(weight) || 0;
-
-    if (numericWeight < 0) {
-      throw ApiError.badRequest(
-        "Weight cannot be negative."
-      );
-    }
-
-    /*
-     * Generate waste ID.
-     *
-     * Count records and create the next number.
-     */
-    const count =
-      await Waste.countDocuments(
-        hospitalId !== DEFAULT_HOSPITAL_ID
-          ? { hospitalId }
-          : {}
-      );
-
-    const wasteId =
-      formatWasteId(count + 1);
-
-    /*
-     * Create record.
-     */
-    const item = await Waste.create({
-      wasteId,
-
-      /*
-       * Only store hospitalId if it is a valid ObjectId.
-       *
-       * This prevents Mongo CastError when using demo mode.
-       */
-      ...(mongoose.Types.ObjectId.isValid(
-        hospitalId
-      )
-        ? {
-            hospitalId,
-          }
-        : {}),
-
-      category:
-        normalizedCategory,
-
-      originalCategory:
-        originalCategory
-          ? normalizeCategory(
-              originalCategory
-            )
-          : normalizedCategory,
-
-      itemType:
-        itemType ||
-        "Biomedical Waste",
-
-      weight:
-        numericWeight,
-
-      sourceLocation:
-        String(source),
-
-      robotId:
-        robotId
-          ? String(robotId).toUpperCase()
-          : null,
-
-      compartmentId:
-        compartmentId
-          ? String(
-              compartmentId
-            ).toUpperCase()
-          : null,
-
-      /*
-       * Scanner normally creates the record
-       * before the robot starts.
-       */
-      status:
-        status ||
-        "pending",
-
-      confidence:
-        Number(confidence) || 0,
-
-      collectedAt:
-        collectedAt
-          ? new Date(collectedAt)
-          : null,
-
-      reviewedByHuman:
-        false,
-
-      /*
-       * Only set taskId if provided.
-       */
-      ...(taskId
-        ? {
-            taskId,
-          }
-        : {}),
-    });
-
-    /*
-     * Audit.
-     */
-    await safeAudit({
-      hospitalId:
+      if (
+        hospitalId &&
+        hospitalId !==
+          DEFAULT_HOSPITAL_ID &&
         mongoose.Types.ObjectId.isValid(
           hospitalId
         )
-          ? hospitalId
-          : null,
+      ) {
+        activeHospitalId =
+          hospitalId;
+      }
 
-      actor:
-        req?.user || null,
+      const filter = {};
 
-      action:
-        "waste.create",
+      if (
+        activeHospitalId &&
+        activeHospitalId !==
+          DEFAULT_HOSPITAL_ID &&
+        mongoose.Types.ObjectId.isValid(
+          activeHospitalId
+        )
+      ) {
+        filter.hospitalId =
+          activeHospitalId;
+      }
 
-      entityType:
-        "Waste",
+      if (status) {
+        filter.status =
+          String(status)
+            .toLowerCase();
+      }
 
-      entityId:
-        item.wasteId,
+      if (
+        category &&
+        category !== "ALL"
+      ) {
+        filter.category =
+          normalizeCategory(
+            category
+          );
+      }
 
-      ip:
-        req?.ip,
+      if (department) {
+        filter.sourceLocation = {
+          $regex:
+            String(department),
+          $options: "i",
+        };
+      }
 
-    });
+      if (search) {
+        const searchValue =
+          String(search);
 
-    /*
-     * Socket event.
-     */
-    try {
-      emitToHospital(
-        hospitalId,
-        EVENTS.WASTE_COLLECTED,
-        item.toJSON()
-      );
-    } catch (socketError) {
-      console.warn(
-        "Waste socket event skipped:",
-        socketError?.message ||
-          socketError
-      );
+        filter.$or = [
+          {
+            category: {
+              $regex:
+                searchValue,
+              $options: "i",
+            },
+          },
+          {
+            sourceLocation: {
+              $regex:
+                searchValue,
+              $options: "i",
+            },
+          },
+          {
+            wasteId: {
+              $regex:
+                searchValue,
+              $options: "i",
+            },
+          },
+          {
+            robotId: {
+              $regex:
+                searchValue,
+              $options: "i",
+            },
+          },
+          {
+            itemType: {
+              $regex:
+                searchValue,
+              $options: "i",
+            },
+          },
+        ];
+      }
+
+      const pageNumber =
+        Math.max(
+          1,
+          Number(page) || 1
+        );
+
+      const limitNumber =
+        Math.min(
+          100,
+          Math.max(
+            1,
+            Number(limit) || 50
+          )
+        );
+
+      const skip =
+        (pageNumber - 1) *
+        limitNumber;
+
+      const [
+        records,
+        total,
+      ] = await Promise.all([
+        Waste.find(filter)
+          .sort({
+            createdAt: -1,
+          })
+          .skip(skip)
+          .limit(limitNumber)
+          .lean(),
+
+        Waste.countDocuments(
+          filter
+        ),
+      ]);
+
+      res.json({
+        success: true,
+
+        data: records,
+
+        meta: {
+          page: pageNumber,
+          limit: limitNumber,
+          total,
+
+          pages:
+            total === 0
+              ? 0
+              : Math.ceil(
+                  total /
+                    limitNumber
+                ),
+        },
+      });
     }
-
-    /*
-     * Response.
-     */
-    res.status(201).json({
-      success: true,
-      data: item,
-    });
-  }
-);
+  );
 
 
 /*
 |--------------------------------------------------------------------------
-| PATCH /api/v1/waste/:id/category
+| GET SINGLE WASTE
+|--------------------------------------------------------------------------
+*/
+
+export const getWaste =
+  asyncHandler(
+    async (req, res) => {
+      const hospitalId =
+        getHospitalId(req);
+
+      const item =
+        await Waste.findOne(
+          byAnyId(
+            req.params.id,
+            hospitalId
+          )
+        ).populate(
+          "taskId",
+          "taskId route transitions status"
+        );
+
+      if (!item) {
+        throw ApiError.notFound(
+          `No waste record ${req.params.id}`
+        );
+      }
+
+      res.json({
+        success: true,
+        data: item,
+      });
+    }
+  );
+
+
+/*
+|--------------------------------------------------------------------------
+| CREATE WASTE
+|--------------------------------------------------------------------------
+*/
+
+export const createWaste =
+  asyncHandler(
+    async (req, res) => {
+      const {
+        category,
+        itemType,
+        weight,
+        sourceLocation,
+        department,
+        robotId,
+        compartmentId,
+        confidence,
+        originalCategory,
+        status,
+        collectedAt,
+        taskId,
+        reviewedByHuman,
+      } = req.body;
+
+      const hospitalId =
+        getHospitalId(req);
+
+      const normalizedCategory =
+        normalizeCategory(
+          category
+        );
+
+      if (
+        !WASTE_CATEGORIES.includes(
+          normalizedCategory
+        )
+      ) {
+        throw ApiError.badRequest(
+          `Category must be one of: ${WASTE_CATEGORIES.join(
+            ", "
+          )}`
+        );
+      }
+
+      const source =
+        sourceLocation ||
+        department;
+
+      if (!source) {
+        throw ApiError.badRequest(
+          "Please provide the source department."
+        );
+      }
+
+      const normalizedSource =
+        normalizeDepartment(
+          source
+        );
+
+      const numericWeight =
+        Number(weight) || 0;
+
+      if (
+        numericWeight < 0
+      ) {
+        throw ApiError.badRequest(
+          "Weight cannot be negative."
+        );
+      }
+
+      /*
+       * Generate next waste ID.
+       */
+
+      const count =
+        await Waste.countDocuments();
+
+      const wasteId =
+        formatWasteId(
+          count + 1
+        );
+
+      /*
+       * Create waste.
+       */
+
+      const item =
+        await Waste.create({
+          wasteId,
+
+          ...(mongoose.Types.ObjectId.isValid(
+            hospitalId
+          )
+            ? {
+                hospitalId,
+              }
+            : {}),
+
+          category:
+            normalizedCategory,
+
+          originalCategory:
+            originalCategory
+              ? normalizeCategory(
+                  originalCategory
+                )
+              : normalizedCategory,
+
+          itemType:
+            itemType ||
+            "Biomedical Waste",
+
+          weight:
+            numericWeight,
+
+          sourceLocation:
+            normalizedSource,
+
+          robotId:
+            robotId
+              ? String(
+                  robotId
+                ).toUpperCase()
+              : null,
+
+          compartmentId:
+            compartmentId
+              ? String(
+                  compartmentId
+                ).toUpperCase()
+              : null,
+
+          status:
+            String(
+              status ||
+                "pending"
+            ).toLowerCase(),
+
+          confidence:
+            Math.min(
+              1,
+              Math.max(
+                0,
+                Number(
+                  confidence
+                ) || 0
+              )
+            ),
+
+          collectedAt:
+            collectedAt
+              ? new Date(
+                  collectedAt
+                )
+              : null,
+
+          reviewedByHuman:
+            Boolean(
+              reviewedByHuman
+            ),
+
+          ...(taskId &&
+          mongoose.Types.ObjectId.isValid(
+            taskId
+          )
+            ? {
+                taskId,
+              }
+            : {}),
+        });
+
+      await safeAudit({
+        hospitalId:
+          mongoose.Types.ObjectId.isValid(
+            hospitalId
+          )
+            ? hospitalId
+            : null,
+
+        actor:
+          req?.user ||
+          null,
+
+        action:
+          "waste.create",
+
+        entityType:
+          "Waste",
+
+        entityId:
+          item.wasteId,
+
+        ip: req?.ip,
+      });
+
+      try {
+        emitToHospital(
+          hospitalId,
+          EVENTS.WASTE_COLLECTED,
+          item.toJSON()
+        );
+      } catch (socketError) {
+        console.warn(
+          "Waste socket skipped:",
+          socketError?.message ||
+            socketError
+        );
+      }
+
+      res.status(201).json({
+        success: true,
+        data: item,
+      });
+    }
+  );
+
+
+/*
+|--------------------------------------------------------------------------
+| UPDATE WASTE ROBOT ASSIGNMENT
+|--------------------------------------------------------------------------
+|
+| Used internally when a robot is dispatched.
+|
+|--------------------------------------------------------------------------
+*/
+
+export const assignRobotToWaste =
+  asyncHandler(
+    async (req, res) => {
+      const {
+        robotId,
+        department,
+        taskId,
+        category,
+        confidence,
+      } = req.body || {};
+
+      if (!robotId) {
+        throw ApiError.badRequest(
+          "robotId is required."
+        );
+      }
+
+      const hospitalId =
+        getHospitalId(req);
+
+      const waste =
+        await Waste.findOne(
+          byAnyId(
+            req.params.id,
+            hospitalId
+          )
+        );
+
+      if (!waste) {
+        throw ApiError.notFound(
+          `No waste record ${req.params.id}`
+        );
+      }
+
+      waste.robotId =
+        String(
+          robotId
+        ).toUpperCase();
+
+      if (department) {
+        waste.sourceLocation =
+          normalizeDepartment(
+            department
+          );
+      }
+
+      if (category) {
+        waste.category =
+          normalizeCategory(
+            category
+          );
+      }
+
+      if (
+        confidence !==
+          undefined &&
+        confidence !== null
+      ) {
+        waste.confidence =
+          Math.min(
+            1,
+            Math.max(
+              0,
+              Number(
+                confidence
+              ) || 0
+            )
+          );
+      }
+
+      if (
+        taskId &&
+        mongoose.Types.ObjectId.isValid(
+          taskId
+        )
+      ) {
+        waste.taskId =
+          taskId;
+      }
+
+      waste.status =
+        "dispatched";
+
+      await waste.save();
+
+      try {
+        emitToHospital(
+          hospitalId,
+          EVENTS.WASTE_COLLECTED,
+          waste.toJSON()
+        );
+      } catch (socketError) {
+        console.warn(
+          "Waste assignment socket skipped:",
+          socketError?.message ||
+            socketError
+        );
+      }
+
+      res.json({
+        success: true,
+        data: waste,
+      });
+    }
+  );
+
+
+/*
+|--------------------------------------------------------------------------
+| RECLASSIFY WASTE
 |--------------------------------------------------------------------------
 */
 
@@ -607,11 +771,10 @@ export const reclassifyWaste =
         getHospitalId(req);
 
       const normalizedCategory =
-        normalizeCategory(category);
+        normalizeCategory(
+          category
+        );
 
-      /*
-       * Validate category.
-       */
       if (
         !WASTE_CATEGORIES.includes(
           normalizedCategory
@@ -624,9 +787,6 @@ export const reclassifyWaste =
         );
       }
 
-      /*
-       * Find record.
-       */
       const item =
         await Waste.findOne(
           byAnyId(
@@ -641,9 +801,6 @@ export const reclassifyWaste =
         );
       }
 
-      /*
-       * No change.
-       */
       if (
         item.category ===
         normalizedCategory
@@ -656,9 +813,6 @@ export const reclassifyWaste =
       const previous =
         item.category;
 
-      /*
-       * Preserve original AI category.
-       */
       if (
         !item.originalCategory
       ) {
@@ -672,10 +826,6 @@ export const reclassifyWaste =
       item.reviewedByHuman =
         true;
 
-      /*
-       * Only save reviewedBy if
-       * authenticated user exists.
-       */
       if (req?.user?._id) {
         item.reviewedBy =
           req.user._id;
@@ -683,9 +833,6 @@ export const reclassifyWaste =
 
       await item.save();
 
-      /*
-       * Audit.
-       */
       await safeAudit({
         hospitalId:
           mongoose.Types.ObjectId.isValid(
@@ -695,7 +842,8 @@ export const reclassifyWaste =
             : null,
 
         actor:
-          req?.user || null,
+          req?.user ||
+          null,
 
         action:
           "waste.reclassify",
@@ -718,13 +866,9 @@ export const reclassifyWaste =
           ],
         },
 
-        ip:
-          req?.ip,
+        ip: req?.ip,
       });
 
-      /*
-       * Socket.
-       */
       try {
         emitToHospital(
           hospitalId,
@@ -742,7 +886,7 @@ export const reclassifyWaste =
         );
       } catch (socketError) {
         console.warn(
-          "Waste classification socket skipped:",
+          "Classification socket skipped:",
           socketError?.message ||
             socketError
         );
@@ -758,7 +902,7 @@ export const reclassifyWaste =
 
 /*
 |--------------------------------------------------------------------------
-| DELETE /api/v1/waste/:id
+| DELETE WASTE
 |--------------------------------------------------------------------------
 */
 
@@ -782,9 +926,6 @@ export const deleteWaste =
         );
       }
 
-      /*
-       * Update compartment load.
-       */
       if (
         item.compartmentId
       ) {
@@ -808,7 +949,8 @@ export const deleteWaste =
                         0
                     ) -
                     Number(
-                      item.weight || 0
+                      item.weight ||
+                        0
                     )
                   ).toFixed(3)
                 )
@@ -830,23 +972,17 @@ export const deleteWaste =
               );
             }
           }
-        } catch (compartmentError) {
+        } catch (error) {
           console.warn(
             "Unable to update compartment:",
-            compartmentError?.message ||
-              compartmentError
+            error?.message ||
+              error
           );
         }
       }
 
-      /*
-       * Delete.
-       */
       await item.deleteOne();
 
-      /*
-       * Audit.
-       */
       await safeAudit({
         hospitalId:
           mongoose.Types.ObjectId.isValid(
@@ -856,7 +992,8 @@ export const deleteWaste =
             : null,
 
         actor:
-          req?.user || null,
+          req?.user ||
+          null,
 
         action:
           "waste.delete",
@@ -867,24 +1004,12 @@ export const deleteWaste =
         entityId:
           item.wasteId,
 
-        changes: {
-          category: [
-            item.category,
-            null,
-          ],
-
-          weight: [
-            item.weight,
-            null,
-          ],
-        },
-
-        ip:
-          req?.ip,
+        ip: req?.ip,
       });
 
       res.json({
         success: true,
+
         data: {
           message:
             `${item.wasteId} removed`,
@@ -896,7 +1021,7 @@ export const deleteWaste =
 
 /*
 |--------------------------------------------------------------------------
-| GET /api/v1/waste/export
+| EXPORT WASTE
 |--------------------------------------------------------------------------
 */
 
@@ -913,10 +1038,6 @@ export const exportWaste =
 
       const filter = {};
 
-      /*
-       * Only add hospital filter for
-       * real Mongo hospital IDs.
-       */
       if (
         hospitalId &&
         hospitalId !==
@@ -929,9 +1050,6 @@ export const exportWaste =
           hospitalId;
       }
 
-      /*
-       * Date filtering.
-       */
       if (from || to) {
         filter.createdAt = {};
 
@@ -963,10 +1081,6 @@ export const exportWaste =
           }
         }
 
-        /*
-         * If invalid date filter becomes empty,
-         * remove it.
-         */
         if (
           Object.keys(
             filter.createdAt
@@ -976,19 +1090,15 @@ export const exportWaste =
         }
       }
 
-      /*
-       * Get records.
-       */
       const rows =
-        await Waste.find(filter)
+        await Waste.find(
+          filter
+        )
           .sort({
             createdAt: 1,
           })
           .lean();
 
-      /*
-       * CSV header.
-       */
       const header = [
         "waste_id",
         "created_at",
@@ -998,17 +1108,18 @@ export const exportWaste =
         "source_location",
         "robot_id",
         "compartment_id",
+        "task_id",
         "status",
         "ai_confidence",
         "human_reviewed",
         "original_category",
         "collected_at",
+        "disposed_at",
       ];
 
-      /*
-       * Escape CSV values.
-       */
-      const escape = (value) => {
+      const escape = (
+        value
+      ) => {
         return `"${String(
           value ?? ""
         ).replace(
@@ -1017,55 +1128,59 @@ export const exportWaste =
         )}"`;
       };
 
-      /*
-       * Build CSV.
-       */
       const csv = [
         header.join(","),
-        ...rows.map((row) =>
-          [
-            row.wasteId,
 
-            row.createdAt
-              ? new Date(
-                  row.createdAt
-                ).toISOString()
-              : "",
+        ...rows.map(
+          (row) =>
+            [
+              row.wasteId,
 
-            row.category,
+              row.createdAt
+                ? new Date(
+                    row.createdAt
+                  ).toISOString()
+                : "",
 
-            row.itemType,
+              row.category,
 
-            row.weight,
+              row.itemType,
 
-            row.sourceLocation,
+              row.weight,
 
-            row.robotId,
+              row.sourceLocation,
 
-            row.compartmentId,
+              row.robotId,
 
-            row.status,
+              row.compartmentId,
 
-            row.confidence,
+              row.taskId,
 
-            row.reviewedByHuman,
+              row.status,
 
-            row.originalCategory,
+              row.confidence,
 
-            row.collectedAt
-              ? new Date(
-                  row.collectedAt
-                ).toISOString()
-              : "",
-          ]
-            .map(escape)
-            .join(",")
+              row.reviewedByHuman,
+
+              row.originalCategory,
+
+              row.collectedAt
+                ? new Date(
+                    row.collectedAt
+                  ).toISOString()
+                : "",
+
+              row.disposedAt
+                ? new Date(
+                    row.disposedAt
+                  ).toISOString()
+                : "",
+            ]
+              .map(escape)
+              .join(",")
         ),
       ].join("\n");
 
-      /*
-       * Audit.
-       */
       await safeAudit({
         hospitalId:
           mongoose.Types.ObjectId.isValid(
@@ -1075,7 +1190,8 @@ export const exportWaste =
             : null,
 
         actor:
-          req?.user || null,
+          req?.user ||
+          null,
 
         action:
           "waste.export",
@@ -1086,21 +1202,14 @@ export const exportWaste =
         entityId:
           `${rows.length} records`,
 
-        ip:
-          req?.ip,
+        ip: req?.ip,
       });
 
-      /*
-       * Filename.
-       */
       const stamp =
         new Date()
           .toISOString()
           .slice(0, 10);
 
-      /*
-       * Headers.
-       */
       res.setHeader(
         "Content-Type",
         "text/csv; charset=utf-8"
