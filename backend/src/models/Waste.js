@@ -6,10 +6,8 @@ const WasteSchema = new mongoose.Schema(
     |--------------------------------------------------------------------------
     | Waste ID
     |--------------------------------------------------------------------------
-    | Example:
-    | MW-0001
-    | MW-0002
     */
+
     wasteId: {
       type: String,
       required: true,
@@ -23,10 +21,8 @@ const WasteSchema = new mongoose.Schema(
     |--------------------------------------------------------------------------
     | Hospital
     |--------------------------------------------------------------------------
-    |
-    | Optional in demo mode.
-    |
     */
+
     hospitalId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Hospital",
@@ -38,13 +34,8 @@ const WasteSchema = new mongoose.Schema(
     |--------------------------------------------------------------------------
     | Waste Category
     |--------------------------------------------------------------------------
-    |
-    | yellow
-    | red
-    | blue
-    | general
-    |
     */
+
     category: {
       type: String,
       required: true,
@@ -63,10 +54,8 @@ const WasteSchema = new mongoose.Schema(
     |--------------------------------------------------------------------------
     | Original AI Category
     |--------------------------------------------------------------------------
-    |
-    | Preserves the first AI prediction even if a human changes it.
-    |
     */
+
     originalCategory: {
       type: String,
       lowercase: true,
@@ -85,6 +74,7 @@ const WasteSchema = new mongoose.Schema(
     | Item Type
     |--------------------------------------------------------------------------
     */
+
     itemType: {
       type: String,
       trim: true,
@@ -96,6 +86,7 @@ const WasteSchema = new mongoose.Schema(
     | Weight
     |--------------------------------------------------------------------------
     */
+
     weight: {
       type: Number,
       min: 0,
@@ -107,13 +98,14 @@ const WasteSchema = new mongoose.Schema(
     | Source Department
     |--------------------------------------------------------------------------
     |
-    | Example:
+    | Examples:
     | OT
     | ICU
-    | Ward
-    | General
+    | WARD
+    | GENERAL
     |
     */
+
     sourceLocation: {
       type: String,
       trim: true,
@@ -123,9 +115,10 @@ const WasteSchema = new mongoose.Schema(
 
     /*
     |--------------------------------------------------------------------------
-    | Robot
+    | Assigned Robot
     |--------------------------------------------------------------------------
     */
+
     robotId: {
       type: String,
       trim: true,
@@ -136,9 +129,10 @@ const WasteSchema = new mongoose.Schema(
 
     /*
     |--------------------------------------------------------------------------
-    | Compartment
+    | Robot Compartment
     |--------------------------------------------------------------------------
     */
+
     compartmentId: {
       type: String,
       trim: true,
@@ -148,43 +142,29 @@ const WasteSchema = new mongoose.Schema(
 
     /*
     |--------------------------------------------------------------------------
-    | Robot task
+    | Robot Task
     |--------------------------------------------------------------------------
     */
+
     taskId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Task",
       default: null,
+      index: true,
     },
 
     /*
     |--------------------------------------------------------------------------
     | Status
     |--------------------------------------------------------------------------
-    |
-    | The system can move through these states:
-    |
-    | pending
-    | confirmed
-    | dispatched
-    | moving_to_pickup
-    | arrived_at_pickup
-    | collecting
-    | moving_to_bin
-    | depositing
-    | collected
-    | disposed
-    | returning
-    | completed
-    | cancelled
-    | failed
-    |
     */
+
     status: {
       type: String,
       lowercase: true,
       trim: true,
       default: "pending",
+
       enum: [
         "pending",
         "confirmed",
@@ -201,6 +181,7 @@ const WasteSchema = new mongoose.Schema(
         "cancelled",
         "failed",
       ],
+
       index: true,
     },
 
@@ -208,10 +189,8 @@ const WasteSchema = new mongoose.Schema(
     |--------------------------------------------------------------------------
     | AI Confidence
     |--------------------------------------------------------------------------
-    |
-    | Normally 0-1.
-    |
     */
+
     confidence: {
       type: Number,
       min: 0,
@@ -224,20 +203,13 @@ const WasteSchema = new mongoose.Schema(
     | Human Review
     |--------------------------------------------------------------------------
     */
+
     reviewedByHuman: {
       type: Boolean,
       default: false,
       index: true,
     },
 
-    /*
-    |--------------------------------------------------------------------------
-    | User who reviewed it
-    |--------------------------------------------------------------------------
-    |
-    | Optional because demo mode does not require authentication.
-    |
-    */
     reviewedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -246,9 +218,10 @@ const WasteSchema = new mongoose.Schema(
 
     /*
     |--------------------------------------------------------------------------
-    | Collection timestamp
+    | Collection Timestamp
     |--------------------------------------------------------------------------
     */
+
     collectedAt: {
       type: Date,
       default: null,
@@ -256,14 +229,16 @@ const WasteSchema = new mongoose.Schema(
 
     /*
     |--------------------------------------------------------------------------
-    | Disposal timestamp
+    | Disposal Timestamp
     |--------------------------------------------------------------------------
     */
+
     disposedAt: {
       type: Date,
       default: null,
     },
   },
+
   {
     timestamps: true,
   }
@@ -289,6 +264,10 @@ WasteSchema.index({
 WasteSchema.index({
   sourceLocation: 1,
   createdAt: -1,
+});
+
+WasteSchema.index({
+  taskId: 1,
 });
 
 WasteSchema.index({
