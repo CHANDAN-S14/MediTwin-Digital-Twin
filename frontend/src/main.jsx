@@ -1,242 +1,27 @@
-import { lazy, Suspense, useEffect } from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
-import { SocketProvider } from './contexts/SocketContext.jsx';
-import { ToastProvider } from './contexts/ToastContext.jsx';
-import AppShell from './components/layout/AppShell.jsx';
-import { Mark } from './components/brand/Logo.jsx';
-import { Link } from 'lucide-react';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App.jsx';
+import './index.css';
 
 /**
- * Routing.
+ * Entry point.
  *
- * Pages are lazy-loaded, which matters more than usual here: the 3D twin pulls in
- * three.js and drei, and that is most of the bundle. Someone who only ever opens
- * the waste register should never download a renderer.
+ * StrictMode is on, and it is worth saying why given what it does to this app:
+ * every effect runs twice in development, which means the socket connects,
+ * disconnects and reconnects on mount. That is not a bug to be worked around — it
+ * is the check that the cleanup in SocketContext actually works. An app that only
+ * behaves correctly when effects run once will misbehave the first time a user
+ * navigates away and back.
  */
 
-const Login = lazy(() => import('./pages/Login.jsx'));
+const container = document.getElementById('root');
 
-const Register = lazy(
-  () => import('./pages/Register.jsx')
+if (!container) {
+  throw new Error('No #root element — index.html is not the one that got served.');
+}
+
+createRoot(container).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
 );
-
-const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
-const Analytics = lazy(() => import('./pages/Analytics.jsx'));
-const Scanner = lazy(() => import('./pages/Scanner.jsx'));
-const WasteRegister = lazy(() => import('./pages/WasteRegister.jsx'));
-const Tasks = lazy(() => import('./pages/Tasks.jsx'));
-const Segregation = lazy(() => import('./pages/Segregation.jsx'));
-const Fleet = lazy(() => import('./pages/Fleet.jsx'));
-const DigitalTwin = lazy(() => import('./pages/DigitalTwin.jsx'));
-const HospitalMap = lazy(() => import('./pages/HospitalMap.jsx'));
-const Alerts = lazy(() => import('./pages/Alerts.jsx'));
-const AuditLog = lazy(() => import('./pages/AuditLog.jsx'));
-const Settings = lazy(() => import('./pages/Settings.jsx'));
-const GuidedRun = lazy(() => import('./pages/GuidedRun.jsx'));
-const NotFound = lazy(() => import('./pages/NotFound.jsx'));
-
-/**
- * The splash shown while the stored token is verified.
- *
- * A brief branded hold rather than a spinner on white, because on a fast local API
- * this is visible for about 80ms and a flash of unstyled loading state looks like a
- * bug.
- */
-function Booting() {
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-canvas">
-      <Mark size={44} className="animate-breathe" />
-      <p className="text-xs text-faint">Restoring your session…</p>
-    </div>
-  );
-}
-
-function RequireAuth({ children }) {
-  const { isAuthenticated, booting } = useAuth();
-  const location = useLocation();
-
-  if (booting) return <Booting />;
-
-  // `state.from` so signing in returns the user to the page they asked for. A
-  // bookmarked compartment page should not dump them on the dashboard.
-  if (!isAuthenticated) {
-    return (
-      <Navigate
-        to="/login"
-        replace
-        state={{ from: location }}
-      />
-    );
-  }
-
-  return children;
-}
-
-function RequireRole({ permission, children }) {
-  const { can } = useAuth();
-
-  if (!can(permission)) {
-    return <Navigate to="/" replace />;
-  }
-
-  return children;
-}
-
-function LoginRoute() {
-  const { isAuthenticated, booting } = useAuth();
-
-  if (booting) return <Booting />;
-
-  if (isAuthenticated) {
-    return <Navigate to="/" replace />;
-  }
-
-  return <Login />;
-}
-
-export default function App() {
-  /*
-   * Wake up the MediTwin AI service when the website is opened.
-   *
-   * This runs once when the React application starts.
-   * It does NOT open another browser tab.
-   */
-  useEffect(() => {
-    fetch('https://meditwin-digital-twin-1.onrender.com/')
-      .then((response) => {
-        if (response.ok) {
-          console.log('✅ MediTwin AI service is ready');
-        } else {
-          console.warn(
-            '⚠️ MediTwin AI service responded with status:',
-            response.status
-          );
-        }
-      })
-      .catch((error) => {
-        console.warn(
-          '⚠️ Could not reach MediTwin AI service:',
-          error
-        );
-      });
-  }, []);
-
-  return (
-    <BrowserRouter>
-      <ToastProvider>
-        <AuthProvider>
-          <SocketProvider>
-            {/* Outer boundary for the routes that sit outside the shell — login and
-                the catch-all. The shell has its own inner boundary so navigating
-                between pages keeps the sidebar on screen instead of blanking it. */}
-
-            <Suspense fallback={<Booting />}>
-              <Routes>
-
-                <Route
-                  path="/login"
-                  element={<LoginRoute />}
-                />
-
-                <Route
-                  path="/register"
-                  element={<Register />}
-                />
-
-                <Route
-                  element={
-                    <RequireAuth>
-                      <AppShell />
-                    </RequireAuth>
-                  }
-                >
-                  <Route
-                    index
-                    element={<Dashboard />}
-                  />
-
-                  <Route
-                    path="analytics"
-                    element={<Analytics />}
-                  />
-
-                  <Route
-                    path="scanner"
-                    element={<Scanner />}
-                  />
-
-                  <Route
-                    path="waste"
-                    element={<WasteRegister />}
-                  />
-
-                  <Route
-                    path="tasks"
-                    element={<Tasks />}
-                  />
-
-                  <Route
-                    path="segregation"
-                    element={<Segregation />}
-                  />
-
-                  <Route
-                    path="fleet"
-                    element={<Fleet />}
-                  />
-
-                  <Route
-                    path="fleet/:robotId"
-                    element={<Fleet />}
-                  />
-
-                  <Route
-                    path="twin"
-                    element={<DigitalTwin />}
-                  />
-
-                  <Route
-                    path="map"
-                    element={<HospitalMap />}
-                  />
-
-                  <Route
-                    path="alerts"
-                    element={<Alerts />}
-                  />
-
-                  <Route
-                    path="audit"
-                    element={
-                      <RequireRole permission="audit.read">
-                        <AuditLog />
-                      </RequireRole>
-                    }
-                  />
-
-                  <Route
-                    path="settings"
-                    element={<Settings />}
-                  />
-
-                  <Route
-                    path="demo"
-                    element={<GuidedRun />}
-                  />
-
-                  <Route
-                    path="*"
-                    element={<NotFound />}
-                  />
-
-                </Route>
-
-              </Routes>
-            </Suspense>
-          </SocketProvider>
-        </AuthProvider>
-      </ToastProvider>
-    </BrowserRouter>
-  );
-}
