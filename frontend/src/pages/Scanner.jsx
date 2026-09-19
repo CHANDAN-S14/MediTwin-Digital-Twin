@@ -1,4 +1,8 @@
-import React, { useRef, useState } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { ai, robots, waste } from "../services/api";
 
@@ -6,11 +10,19 @@ const ROBOT_MIN_BATTERY = 15;
 
 function Scanner() {
   const navigate = useNavigate();
-  const fileInputRef = useRef(null);
 
-  // ---------------------------------------------------------
+  // =========================================================
+  // REFS
+  // =========================================================
+
+  const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const cameraStreamRef = useRef(null);
+
+  // =========================================================
   // IMAGE / SCAN STATE
-  // ---------------------------------------------------------
+  // =========================================================
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -18,51 +30,248 @@ function Scanner() {
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState(null);
 
-  // ---------------------------------------------------------
+  // =========================================================
+  // CAMERA STATE
+  // =========================================================
+
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+
+  // =========================================================
   // HUMAN CONFIRMATION
-  // ---------------------------------------------------------
+  // =========================================================
 
   const [humanConfirmed, setHumanConfirmed] = useState(false);
 
-  // ---------------------------------------------------------
+  // =========================================================
   // WASTE SAVE STATE
-  // ---------------------------------------------------------
+  // =========================================================
 
   const [savingWaste, setSavingWaste] = useState(false);
   const [savedWaste, setSavedWaste] = useState(null);
 
-  // ---------------------------------------------------------
+  // =========================================================
   // ROBOT DISPATCH STATE
-  // ---------------------------------------------------------
+  // =========================================================
 
   const [dispatching, setDispatching] = useState(false);
   const [dispatchStatus, setDispatchStatus] = useState("");
   const [dispatchError, setDispatchError] = useState("");
 
-  // ---------------------------------------------------------
+  // =========================================================
   // FORM STATE
-  // ---------------------------------------------------------
+  // =========================================================
 
   const [department, setDepartment] = useState("OT");
   const [weight, setWeight] = useState("");
 
-  // ---------------------------------------------------------
-  // FILE SELECT
-  // ---------------------------------------------------------
+  // =========================================================
+  // STOP CAMERA
+  // =========================================================
 
-  const handleFileChange = (event) => {
-    const file = event.target.files?.[0];
+  const stopCamera = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current
+        .getTracks()
+        .forEach((track) => track.stop());
 
+      cameraStreamRef.current = null;
+    }
+
+    setCameraOpen(false);
+    setCameraLoading(false);
+  };
+
+  // =========================================================
+  // START CAMERA
+  // =========================================================
+
+  const startCamera = async () => {
+    setCameraError("");
+    setDispatchError("");
+    setDispatchStatus("");
+
+    if (
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getUserMedia
+    ) {
+      setCameraError(
+        "Camera access is not supported by this browser. Please choose an image file instead."
+      );
+      return;
+    }
+
+    try {
+      setCameraLoading(true);
+      setCameraOpen(true);
+
+      const stream =
+        await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: {
+              ideal: "environment",
+            },
+            width: {
+              ideal: 1280,
+            },
+            height: {
+              ideal: 720,
+            },
+          },
+          audio: false,
+        });
+
+      cameraStreamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+
+        await videoRef.current.play();
+      }
+    } catch (error) {
+      console.error(
+        "Camera access error:",
+        error
+      );
+
+      setCameraOpen(false);
+
+      if (
+        error?.name === "NotAllowedError"
+      ) {
+        setCameraError(
+          "Camera permission was denied. Please allow camera access or choose an image file."
+        );
+      } else if (
+        error?.name === "NotFoundError"
+      ) {
+        setCameraError(
+          "No camera was found on this device. Please choose an image file."
+        );
+      } else {
+        setCameraError(
+          "Unable to access the camera. Please check your browser permissions."
+        );
+      }
+
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+
+        cameraStreamRef.current = null;
+      }
+    } finally {
+      setCameraLoading(false);
+    }
+  };
+
+  // =========================================================
+  // CAPTURE CAMERA PHOTO
+  // =========================================================
+
+  const capturePhoto = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (!video || !canvas) {
+      setCameraError(
+        "Camera is not ready. Please try again."
+      );
+      return;
+    }
+
+    if (
+      video.videoWidth === 0 ||
+      video.videoHeight === 0
+    ) {
+      setCameraError(
+        "Camera image is not ready yet. Please wait a moment and try again."
+      );
+      return;
+    }
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context =
+      canvas.getContext("2d");
+
+    context.drawImage(
+      video,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          setCameraError(
+            "Unable to capture the image."
+          );
+          return;
+        }
+
+        const file = new File(
+          [blob],
+          `waste-camera-${Date.now()}.jpg`,
+          {
+            type: "image/jpeg",
+          }
+        );
+
+        setSelectedImage(file);
+
+        stopCamera();
+      },
+      "image/jpeg",
+      0.92
+    );
+  };
+
+  // =========================================================
+  // CLEAN CAMERA ON UNMOUNT
+  // =========================================================
+
+  useEffect(() => {
+    return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+
+        cameraStreamRef.current = null;
+      }
+
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, []);
+
+  // =========================================================
+  // SET SELECTED IMAGE
+  // =========================================================
+
+  const setSelectedImage = (file) => {
     if (!file) {
       return;
     }
 
     if (!file.type.startsWith("image/")) {
-      setDispatchError("Please select an image file.");
+      setDispatchError(
+        "Please select an image file."
+      );
       return;
     }
 
-    // Release old preview URL
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
@@ -74,21 +283,38 @@ function Scanner() {
     setDispatchStatus("");
     setDispatchError("");
 
-    const url = URL.createObjectURL(file);
+    const url =
+      URL.createObjectURL(file);
+
     setPreviewUrl(url);
   };
 
-  // ---------------------------------------------------------
+  // =========================================================
+  // FILE SELECT
+  // =========================================================
+
+  const handleFileChange = (event) => {
+    const file =
+      event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setSelectedImage(file);
+  };
+
+  // =========================================================
   // OPEN FILE SELECTOR
-  // ---------------------------------------------------------
+  // =========================================================
 
   const openFileSelector = () => {
     fileInputRef.current?.click();
   };
 
-  // ---------------------------------------------------------
+  // =========================================================
   // SCAN IMAGE
-  // ---------------------------------------------------------
+  // =========================================================
 
   const analyze = async () => {
     setDispatchError("");
@@ -96,53 +322,46 @@ function Scanner() {
     setSavedWaste(null);
 
     if (!selectedFile) {
-      setDispatchError('Attach an image in the "image" field.');
+      setDispatchError(
+        'Choose an image using "Camera" or "Choose File".'
+      );
       return;
     }
 
     if (!department) {
-      setDispatchError("Please select a source department.");
+      setDispatchError(
+        "Please select a source department."
+      );
       return;
     }
 
     try {
       setScanning(true);
 
-      console.log("Sending AI scan:", {
-        file: selectedFile.name,
-        type: selectedFile.type,
-        size: selectedFile.size,
-        department,
-        weight,
-      });
+      console.log(
+        "Sending AI scan:",
+        {
+          file: selectedFile.name,
+          type: selectedFile.type,
+          size: selectedFile.size,
+          department,
+          weight,
+        }
+      );
 
-      /*
-       * IMPORTANT:
-       *
-       * persist=false
-       *
-       * We do NOT save the waste yet.
-       *
-       * First:
-       * AI → Human Review → Confirm
-       *
-       * Then:
-       * POST /waste
-       */
+      const result =
+        await ai.classify({
+          file: selectedFile,
+          department,
+          weight,
+          persist: false,
+          dispatch: false,
+        });
 
-      const result = await ai.classify({
-        file: selectedFile,
-        department,
-        weight,
-        persist: false,
-        dispatch: false,
-      });
-
-      console.log("AI classification result:", result);
-
-      // -----------------------------------------------------
-      // CATEGORY
-      // -----------------------------------------------------
+      console.log(
+        "AI classification result:",
+        result
+      );
 
       const category =
         result?.category ||
@@ -151,10 +370,6 @@ function Scanner() {
         result?.classification?.category ||
         result?.data?.category ||
         "general";
-
-      // -----------------------------------------------------
-      // CONFIDENCE
-      // -----------------------------------------------------
 
       const confidence =
         Number(
@@ -165,9 +380,10 @@ function Scanner() {
             0
         ) || 0;
 
-      const normalizedCategory = String(category)
-        .toLowerCase()
-        .trim();
+      const normalizedCategory =
+        String(category)
+          .toLowerCase()
+          .trim();
 
       const finalCategory = [
         "yellow",
@@ -178,22 +394,14 @@ function Scanner() {
         ? normalizedCategory
         : "general";
 
-      // -----------------------------------------------------
-      // NORMALIZED RESULT
-      // -----------------------------------------------------
-
       const normalizedResult = {
         ...result,
-
         category: finalCategory,
-
         confidence,
-
         department,
-
         weight,
-
-        imageName: selectedFile.name,
+        imageName:
+          selectedFile.name,
       };
 
       console.log(
@@ -201,16 +409,20 @@ function Scanner() {
         normalizedResult
       );
 
-      setScanResult(normalizedResult);
+      setScanResult(
+        normalizedResult
+      );
 
-      // Human must explicitly confirm
       setHumanConfirmed(false);
 
       setDispatchStatus(
         "AI classification completed. Please review and confirm the result."
       );
     } catch (error) {
-      console.error("AI Scanner error:", error);
+      console.error(
+        "AI Scanner error:",
+        error
+      );
 
       setDispatchError(
         error?.message ||
@@ -223,9 +435,9 @@ function Scanner() {
     }
   };
 
-  // ---------------------------------------------------------
+  // =========================================================
   // HUMAN CONFIRMATION
-  // ---------------------------------------------------------
+  // =========================================================
 
   const confirmClassification = () => {
     if (!scanResult) {
@@ -243,9 +455,9 @@ function Scanner() {
     );
   };
 
-  // ---------------------------------------------------------
+  // =========================================================
   // SAVE WASTE RECORD
-  // ---------------------------------------------------------
+  // =========================================================
 
   const saveWasteRecord = async () => {
     if (!scanResult) {
@@ -253,12 +465,6 @@ function Scanner() {
         "No AI classification result is available."
       );
     }
-
-    /*
-     * Prevent duplicate waste records.
-     *
-     * If the waste was already saved, return it.
-     */
 
     if (savedWaste) {
       return savedWaste;
@@ -274,12 +480,15 @@ function Scanner() {
           "Biomedical Waste",
 
         category:
-          scanResult.category || "general",
+          scanResult.category ||
+          "general",
 
         department,
 
         confidence:
-          Number(scanResult.confidence || 0),
+          Number(
+            scanResult.confidence || 0
+          ),
 
         weight:
           weight !== ""
@@ -287,7 +496,8 @@ function Scanner() {
             : 0,
 
         imageName:
-          selectedFile?.name || null,
+          selectedFile?.name ||
+          null,
 
         status: "CONFIRMED",
       };
@@ -297,31 +507,13 @@ function Scanner() {
         payload
       );
 
-      /*
-       * POST
-       *
-       * /api/v1/waste
-       */
-
-      const response = await waste.create(payload);
+      const response =
+        await waste.create(payload);
 
       console.log(
         "Waste record created:",
         response
       );
-
-      /*
-       * api.js unwraps:
-       *
-       * {
-       *   success: true,
-       *   data: {...}
-       * }
-       *
-       * into:
-       *
-       * {...}
-       */
 
       const createdWaste =
         response?.data &&
@@ -330,7 +522,9 @@ function Scanner() {
           ? response.data
           : response;
 
-      setSavedWaste(createdWaste);
+      setSavedWaste(
+        createdWaste
+      );
 
       return createdWaste;
     } catch (error) {
@@ -348,31 +542,22 @@ function Scanner() {
     }
   };
 
-  // ---------------------------------------------------------
+  // =========================================================
   // FIND AVAILABLE ROBOT
-  // ---------------------------------------------------------
+  // =========================================================
 
   const findAvailableRobot = async () => {
-    const result = await robots.list();
+    const result =
+      await robots.list();
 
-    /*
-     * api.js unwraps:
-     *
-     * {
-     *   success: true,
-     *   data: [...]
-     * }
-     *
-     * into:
-     *
-     * [...]
-     */
-
-    const robotList = Array.isArray(result)
-      ? result
-      : Array.isArray(result?.data)
-      ? result.data
-      : [];
+    const robotList =
+      Array.isArray(result)
+        ? result
+        : Array.isArray(
+            result?.data
+          )
+        ? result.data
+        : [];
 
     console.log(
       "Available robots:",
@@ -380,27 +565,32 @@ function Scanner() {
     );
 
     const availableRobot =
-      robotList.find((robot) => {
-        const status = String(
-          robot.status || ""
-        ).toUpperCase();
+      robotList.find(
+        (robot) => {
+          const status =
+            String(
+              robot.status || ""
+            ).toUpperCase();
 
-        const battery = Number(
-          robot.battery ?? 0
-        );
+          const battery =
+            Number(
+              robot.battery ?? 0
+            );
 
-        return (
-          status === "IDLE" &&
-          battery > ROBOT_MIN_BATTERY
-        );
-      });
+          return (
+            status === "IDLE" &&
+            battery >
+              ROBOT_MIN_BATTERY
+          );
+        }
+      );
 
     return availableRobot;
   };
 
-  // ---------------------------------------------------------
+  // =========================================================
   // DISPATCH ROBOT
-  // ---------------------------------------------------------
+  // =========================================================
 
   const dispatchRobot = async () => {
     setDispatchError("");
@@ -429,10 +619,6 @@ function Scanner() {
     try {
       setDispatching(true);
 
-      // =====================================================
-      // STEP 1 — SAVE WASTE RECORD
-      // =====================================================
-
       setDispatchStatus(
         "Saving confirmed waste record..."
       );
@@ -444,10 +630,6 @@ function Scanner() {
         "Confirmed waste record:",
         wasteRecord
       );
-
-      // -----------------------------------------------------
-      // GET WASTE ID
-      // -----------------------------------------------------
 
       const wasteId =
         wasteRecord?.wasteId ||
@@ -469,10 +651,6 @@ function Scanner() {
       setDispatchStatus(
         `Waste record created successfully. ID: ${wasteId}. Searching for an available robot...`
       );
-
-      // =====================================================
-      // STEP 2 — FIND ROBOT
-      // =====================================================
 
       const robot =
         await findAvailableRobot();
@@ -499,17 +677,9 @@ function Scanner() {
         );
       }
 
-      // =====================================================
-      // STEP 3 — CATEGORY
-      // =====================================================
-
       const expectedCategory =
         scanResult.category ||
         "general";
-
-      // =====================================================
-      // STEP 4 — DISPATCH ROBOT
-      // =====================================================
 
       setDispatchStatus(
         `${robotId} selected. Dispatching robot to ${department}...`
@@ -522,15 +692,9 @@ function Scanner() {
 
         confidence:
           Number(
-            scanResult.confidence || 0
+            scanResult.confidence ||
+              0
           ),
-
-        /*
-         * IMPORTANT:
-         *
-         * This is now the actual database
-         * waste record ID.
-         */
 
         wasteId,
       };
@@ -551,10 +715,6 @@ function Scanner() {
         response
       );
 
-      // =====================================================
-      // STEP 5 — TASK ID
-      // =====================================================
-
       const task =
         response?.task ||
         response?.data?.task ||
@@ -567,10 +727,6 @@ function Scanner() {
         response?.taskId ||
         response?.data?.taskId ||
         null;
-
-      // =====================================================
-      // STEP 6 — DIGITAL TWIN PAYLOAD
-      // =====================================================
 
       const digitalTwinTask = {
         taskId,
@@ -589,7 +745,8 @@ function Scanner() {
 
         confidence:
           Number(
-            scanResult.confidence || 0
+            scanResult.confidence ||
+              0
           ),
 
         weight:
@@ -610,17 +767,14 @@ function Scanner() {
           new Date().toISOString(),
 
         imageName:
-          selectedFile?.name || null,
+          selectedFile?.name ||
+          null,
       };
 
       console.log(
         "Digital Twin task:",
         digitalTwinTask
       );
-
-      // =====================================================
-      // STEP 7 — SAVE DIGITAL TWIN TASK
-      // =====================================================
 
       try {
         sessionStorage.setItem(
@@ -636,27 +790,16 @@ function Scanner() {
         );
       }
 
-      // =====================================================
-      // STEP 8 — SUCCESS
-      // =====================================================
-
       setDispatchStatus(
         `${robotId} dispatched successfully. Opening Digital Twin...`
       );
-
-      // =====================================================
-      // STEP 9 — OPEN DIGITAL TWIN
-      // =====================================================
 
       setTimeout(() => {
         navigate("/twin", {
           state: {
             task: digitalTwinTask,
-
             robot,
-
             scanResult,
-
             waste: wasteRecord,
           },
         });
@@ -672,26 +815,23 @@ function Scanner() {
           "Unable to process waste collection."
       );
 
-      /*
-       * Do NOT remove savedWaste here.
-       *
-       * If robot dispatch fails after waste creation,
-       * the waste record remains in the database.
-       */
-
       setDispatchStatus("");
     } finally {
       setDispatching(false);
     }
   };
 
-  // ---------------------------------------------------------
+  // =========================================================
   // RESET
-  // ---------------------------------------------------------
+  // =========================================================
 
   const resetScanner = () => {
+    stopCamera();
+
     if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
+      URL.revokeObjectURL(
+        previewUrl
+      );
     }
 
     setSelectedFile(null);
@@ -704,20 +844,23 @@ function Scanner() {
     setScanning(false);
     setDispatchStatus("");
     setDispatchError("");
+    setCameraError("");
 
     if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+      fileInputRef.current.value =
+        "";
     }
   };
 
-  // ---------------------------------------------------------
+  // =========================================================
   // FORMAT CONFIDENCE
-  // ---------------------------------------------------------
+  // =========================================================
 
-  const formatConfidence = (value) => {
-    const number = Number(
-      value || 0
-    );
+  const formatConfidence = (
+    value
+  ) => {
+    const number =
+      Number(value || 0);
 
     if (number <= 1) {
       return `${(
@@ -728,11 +871,13 @@ function Scanner() {
     return `${number.toFixed(1)}%`;
   };
 
-  // ---------------------------------------------------------
+  // =========================================================
   // BIN COLOR
-  // ---------------------------------------------------------
+  // =========================================================
 
-  const getBinColor = (category) => {
+  const getBinColor = (
+    category
+  ) => {
     switch (category) {
       case "yellow":
         return "bg-yellow-400";
@@ -749,9 +894,9 @@ function Scanner() {
     }
   };
 
-  // ---------------------------------------------------------
+  // =========================================================
   // UI
-  // ---------------------------------------------------------
+  // =========================================================
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
@@ -767,9 +912,11 @@ function Scanner() {
           </h1>
 
           <p className="mt-2 text-slate-500">
-            Scan waste, review the AI classification,
-            confirm it manually, save the record, and
-            dispatch a robot for collection.
+            Scan waste, review the AI
+            classification, confirm it
+            manually, save the record,
+            and dispatch a robot for
+            collection.
           </p>
         </div>
 
@@ -785,6 +932,22 @@ function Scanner() {
 
             <div className="mt-1 text-sm">
               {dispatchError}
+            </div>
+          </div>
+        )}
+
+        {/* ================================================= */}
+        {/* CAMERA ERROR */}
+        {/* ================================================= */}
+
+        {cameraError && (
+          <div className="mb-5 rounded-xl border border-orange-200 bg-orange-50 p-4 text-orange-700">
+            <div className="font-semibold">
+              📷 Camera
+            </div>
+
+            <div className="mt-1 text-sm">
+              {cameraError}
             </div>
           </div>
         )}
@@ -853,50 +1016,168 @@ function Scanner() {
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              onChange={handleFileChange}
+              onChange={
+                handleFileChange
+              }
               className="hidden"
             />
 
-            {/* IMAGE AREA */}
+            {/* CAMERA MODAL / VIEW */}
+            {cameraOpen ? (
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-black">
 
-            <button
-              type="button"
-              onClick={openFileSelector}
-              className="flex min-h-[280px] w-full items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 transition hover:border-blue-400 hover:bg-blue-50"
-            >
-              {previewUrl ? (
-                <img
-                  src={previewUrl}
-                  alt="Selected waste"
-                  className="max-h-[280px] w-full object-contain"
-                />
-              ) : (
-                <div className="text-center">
+                <div className="relative aspect-video w-full">
 
-                  <div className="mb-3 text-5xl">
-                    📷
-                  </div>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="h-full w-full object-cover"
+                  />
 
-                  <div className="font-semibold text-slate-700">
-                    Click to upload waste image
-                  </div>
+                  {/* CAMERA GUIDE */}
 
-                  <div className="mt-1 text-sm text-slate-400">
-                    JPG, PNG, WEBP
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <div className="h-48 w-64 rounded-2xl border-2 border-white/80 shadow-lg" />
                   </div>
 
                 </div>
-              )}
-            </button>
+
+                <div className="flex gap-3 bg-slate-900 p-4">
+
+                  <button
+                    type="button"
+                    onClick={
+                      capturePhoto
+                    }
+                    disabled={
+                      cameraLoading
+                    }
+                    className="flex-1 rounded-xl bg-blue-600 px-4 py-3 font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    📸 Capture Photo
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={
+                      stopCamera
+                    }
+                    className="rounded-xl bg-white px-4 py-3 font-semibold text-slate-800 hover:bg-slate-100"
+                  >
+                    Cancel
+                  </button>
+
+                </div>
+
+              </div>
+            ) : (
+              <>
+                {/* IMAGE PREVIEW */}
+
+                <div className="overflow-hidden rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50">
+
+                  {previewUrl ? (
+                    <div className="relative flex min-h-[280px] items-center justify-center">
+
+                      <img
+                        src={previewUrl}
+                        alt="Selected waste"
+                        className="max-h-[280px] w-full object-contain"
+                      />
+
+                    </div>
+                  ) : (
+                    <div className="flex min-h-[280px] items-center justify-center">
+
+                      <div className="text-center">
+
+                        <div className="mb-3 text-5xl">
+                          🧪
+                        </div>
+
+                        <div className="font-semibold text-slate-700">
+                          Choose how you want
+                          to scan
+                        </div>
+
+                        <div className="mt-1 text-sm text-slate-400">
+                          Use your camera or
+                          select an existing image
+                        </div>
+
+                      </div>
+
+                    </div>
+                  )}
+
+                </div>
+
+                {/* CAMERA + FILE BUTTONS */}
+
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+                  <button
+                    type="button"
+                    onClick={
+                      startCamera
+                    }
+                    disabled={
+                      scanning ||
+                      dispatching ||
+                      savingWaste
+                    }
+                    className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    📷 Use Camera
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={
+                      openFileSelector
+                    }
+                    disabled={
+                      scanning ||
+                      dispatching ||
+                      savingWaste
+                    }
+                    className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-3 font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    📁 Choose File
+                  </button>
+
+                </div>
+              </>
+            )}
+
+            {/* CANVAS USED FOR CAMERA CAPTURE */}
+
+            <canvas
+              ref={canvasRef}
+              className="hidden"
+            />
 
             {/* FILE NAME */}
 
             {selectedFile && (
               <div className="mt-3 rounded-lg bg-slate-100 p-3 text-sm">
+
                 <span className="font-medium">
                   Selected:
                 </span>{" "}
                 {selectedFile.name}
+
+                <div className="mt-1 text-xs text-slate-500">
+                  {selectedFile.size
+                    ? `${(
+                        selectedFile.size /
+                        1024
+                      ).toFixed(1)} KB`
+                    : ""}
+                </div>
+
               </div>
             )}
 
@@ -983,7 +1264,9 @@ function Scanner() {
             {selectedFile && (
               <button
                 type="button"
-                onClick={resetScanner}
+                onClick={
+                  resetScanner
+                }
                 disabled={
                   scanning ||
                   dispatching ||
@@ -1021,7 +1304,9 @@ function Scanner() {
                   </p>
 
                   <p className="mt-1 text-sm text-slate-400">
-                    Upload an image and scan it first.
+                    Use the camera or
+                    choose an image file
+                    and scan it first.
                   </p>
 
                 </div>
@@ -1030,9 +1315,7 @@ function Scanner() {
             ) : (
               <div>
 
-                {/* ================================================= */}
                 {/* CATEGORY */}
-                {/* ================================================= */}
 
                 <div className="rounded-2xl border border-slate-200 p-5">
 
@@ -1049,7 +1332,9 @@ function Scanner() {
                     />
 
                     <div className="text-3xl font-bold uppercase text-slate-900">
-                      {scanResult.category}
+                      {
+                        scanResult.category
+                      }
                     </div>
 
                   </div>
@@ -1081,9 +1366,7 @@ function Scanner() {
 
                 </div>
 
-                {/* ================================================= */}
                 {/* HUMAN CONFIRMATION */}
-                {/* ================================================= */}
 
                 <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 p-5">
 
@@ -1092,9 +1375,11 @@ function Scanner() {
                   </div>
 
                   <p className="mt-2 text-sm text-orange-800">
-                    Verify that the AI classification is
-                    correct before saving the waste record
-                    and sending the robot.
+                    Verify that the AI
+                    classification is
+                    correct before saving
+                    the waste record and
+                    sending the robot.
                   </p>
 
                   <label className="mt-4 flex cursor-pointer items-start gap-3">
@@ -1106,7 +1391,8 @@ function Scanner() {
                       }
                       onChange={(e) => {
                         const checked =
-                          e.target.checked;
+                          e.target
+                            .checked;
 
                         setHumanConfirmed(
                           checked
@@ -1115,15 +1401,20 @@ function Scanner() {
                         if (checked) {
                           confirmClassification();
                         } else {
-                          setDispatchStatus("");
+                          setDispatchStatus(
+                            ""
+                          );
                         }
                       }}
                       className="mt-1 h-5 w-5"
                     />
 
                     <span className="text-sm font-medium text-orange-900">
-                      I confirm that this waste category
-                      is correct and approve robot
+                      I confirm that
+                      this waste
+                      category is
+                      correct and
+                      approve robot
                       collection.
                     </span>
 
@@ -1131,13 +1422,13 @@ function Scanner() {
 
                 </div>
 
-                {/* ================================================= */}
                 {/* SAVE + DISPATCH */}
-                {/* ================================================= */}
 
                 <button
                   type="button"
-                  onClick={dispatchRobot}
+                  onClick={
+                    dispatchRobot
+                  }
                   disabled={
                     dispatching ||
                     scanning ||
@@ -1159,9 +1450,11 @@ function Scanner() {
 
                 {!humanConfirmed && (
                   <p className="mt-3 text-center text-sm text-slate-400">
-                    Confirm the classification above to
-                    enable waste registration and robot
-                    collection.
+                    Confirm the
+                    classification above
+                    to enable waste
+                    registration and
+                    robot collection.
                   </p>
                 )}
 
@@ -1188,7 +1481,7 @@ function Scanner() {
               [
                 "1",
                 "Scan",
-                "Upload waste image",
+                "Camera or file",
               ],
               [
                 "2",
