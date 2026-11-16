@@ -2,7 +2,7 @@
 
 ### AI-Powered Biomedical Waste Management System with 3D Digital Twin and Robotic Simulation
 
-\<p align="center">   \<b>Smart Healthcare Waste Segregation | AI Classification | Intelligent Robot Simulation | Digital Twin\</b> \</p>
+<p align="center">   <b>Smart Healthcare Waste Segregation | AI Classification | Intelligent Robot Simulation | Digital Twin</b> </p>
 
 ## Overview
 
@@ -722,4 +722,4 @@ Add an appropriate open-source license after deciding how the project will be di
 
 ---
 
-\<p align="center">   \<b>MediTwin – Making Biomedical Waste Management Smarter, Safer and More Traceable.\</b> \</p>
+<p align="center">   <b>MediTwin – Making Biomedical Waste Management Smarter, Safer and More Traceable.</b> </p>
